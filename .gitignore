@@ -1,8 +1,13 @@
 # Rust
 /target
+**/target/
 **/*.rs.bk
 *.pdb
-Cargo.lock.bak
+
+# Node
+node_modules/
+dist/
+*.tsbuildinfo
 
 # Editor / IDE
 .vscode/
@@ -19,3 +24,6 @@ Cargo.lock.bak
 # OpenCherry runtime
 /.opencherry-cache/
 /data/local/
+
+# Tauri generated
+**/src-tauri/gen/

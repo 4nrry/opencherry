@@ -1,0 +1,10 @@
+# Tauri build artifacts
+src-tauri/target/
+src-tauri/gen/
+
+# Frontend
+node_modules/
+dist/
+
+# TS build info
+*.tsbuildinfo
