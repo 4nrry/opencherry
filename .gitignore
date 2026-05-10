@@ -1,0 +1,21 @@
+# Rust
+/target
+**/*.rs.bk
+*.pdb
+Cargo.lock.bak
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Env / local
+.env
+.env.local
+*.log
+
+# OpenCherry runtime
+/.opencherry-cache/
+/data/local/
