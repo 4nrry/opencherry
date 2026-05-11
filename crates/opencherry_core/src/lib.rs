@@ -51,6 +51,26 @@ pub struct RepoStatus {
     pub upstream: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoDiff {
+    pub files: Vec<RepoDiffFile>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoDiffFile {
+    pub path: String,
+    pub status: String,
+    pub additions: usize,
+    pub deletions: usize,
+    pub patch: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommitResult {
+    pub oid: String,
+    pub summary: String,
+}
+
 /// Known coding-agent kinds OpenCherry can detect or orchestrate.
 ///
 /// Unknown is reserved for future extensibility and for processes that

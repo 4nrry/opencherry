@@ -5,10 +5,11 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-description = "JSON-backed config persistence for OpenCherry (Sprint 1)."
+description = "SQLite-backed config persistence for OpenCherry."
 
 [dependencies]
 opencherry_core = { workspace = true }
+rusqlite = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }

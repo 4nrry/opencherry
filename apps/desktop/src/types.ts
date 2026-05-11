@@ -17,6 +17,23 @@ export interface RepoStatus {
   upstream: string | null;
 }
 
+export interface RepoDiff {
+  files: RepoDiffFile[];
+}
+
+export interface RepoDiffFile {
+  path: string;
+  status: string;
+  additions: number;
+  deletions: number;
+  patch: string;
+}
+
+export interface CommitResult {
+  oid: string;
+  summary: string;
+}
+
 export type AgentKind =
   | "claude-code"
   | "open-code"

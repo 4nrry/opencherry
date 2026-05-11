@@ -9,7 +9,13 @@ import {
 } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import type { DetectedAgent, RepoRef, RepoStatus } from "./types";
+import type {
+  CommitResult,
+  DetectedAgent,
+  RepoDiff,
+  RepoRef,
+  RepoStatus,
+} from "./types";
 
 async function fetchRepos(): Promise<RepoRef[]> {
   return await invoke<RepoRef[]>("list_repos");
@@ -21,6 +27,10 @@ async function fetchAgents(): Promise<DetectedAgent[]> {
 
 async function fetchStatus(path: string): Promise<RepoStatus> {
   return await invoke<RepoStatus>("repo_status", { path });
+}
+
+async function fetchDiff(path: string): Promise<RepoDiff> {
+  return await invoke<RepoDiff>("repo_diff", { path });
 }
 
 export default function App() {
@@ -134,15 +144,42 @@ function RepoView(props: { repo: RepoRef }) {
     () => props.repo.path,
     (p) => fetchStatus(p),
   );
+  const [diff, { refetch: refetchDiff }] = createResource(
+    () => props.repo.path,
+    (p) => fetchDiff(p),
+  );
+  const [message, setMessage] = createSignal("");
+  const [commitError, setCommitError] = createSignal<string | null>(null);
+  const [commitResult, setCommitResult] = createSignal<CommitResult | null>(null);
 
   // Refresh status every 5s while this repo is selected.
   let timer: ReturnType<typeof setInterval> | undefined;
   onMount(() => {
-    timer = setInterval(() => refetch(), 5000);
+    timer = setInterval(() => {
+      void refetch();
+      void refetchDiff();
+    }, 5000);
   });
   onCleanup(() => {
     if (timer) clearInterval(timer);
   });
+
+  async function commit() {
+    setCommitError(null);
+    setCommitResult(null);
+    try {
+      const result = await invoke<CommitResult>("commit_repo", {
+        path: props.repo.path,
+        message: message(),
+      });
+      setCommitResult(result);
+      setMessage("");
+      await refetch();
+      await refetchDiff();
+    } catch (e) {
+      setCommitError(String(e));
+    }
+  }
 
   return (
     <section class="repo-view">
@@ -160,29 +197,92 @@ function RepoView(props: { repo: RepoRef }) {
         }
       >
         {(s) => (
-          <div class="status-grid">
-            <StatusCard label="Branch" value={s().branch ?? "(detached)"} />
-            <StatusCard label="HEAD" value={s().head_short ?? "—"} mono />
-            <StatusCard
-              label="Working tree"
-              value={s().dirty ? "dirty" : "clean"}
-              tone={s().dirty ? "warn" : "ok"}
-            />
-            <StatusCard
-              label="Upstream"
-              value={s().upstream ?? "(none)"}
-              mono
-            />
-            <StatusCard
-              label="Ahead / Behind"
-              value={
-                s().ahead !== null && s().behind !== null
-                  ? `↑${s().ahead}  ↓${s().behind}`
-                  : "—"
-              }
-            />
-          </div>
+          <>
+            <div class="status-grid">
+              <StatusCard label="Branch" value={s().branch ?? "(detached)"} />
+              <StatusCard label="HEAD" value={s().head_short ?? "—"} mono />
+              <StatusCard
+                label="Working tree"
+                value={s().dirty ? "dirty" : "clean"}
+                tone={s().dirty ? "warn" : "ok"}
+              />
+              <StatusCard
+                label="Upstream"
+                value={s().upstream ?? "(none)"}
+                mono
+              />
+              <StatusCard
+                label="Ahead / Behind"
+                value={
+                  s().ahead !== null && s().behind !== null
+                    ? `↑${s().ahead}  ↓${s().behind}`
+                    : "—"
+                }
+              />
+            </div>
+
+            <section class="commit-box">
+              <textarea
+                class="commit-box__message"
+                placeholder="Commit message"
+                value={message()}
+                onInput={(e) => setMessage(e.currentTarget.value)}
+              />
+              <div class="commit-box__actions">
+                <button
+                  class="btn"
+                  disabled={!s().dirty || message().trim().length === 0}
+                  onClick={() => void commit()}
+                >
+                  Commit all changes
+                </button>
+                <Show when={commitResult()}>
+                  {(r) => (
+                    <span class="commit-box__result">
+                      Committed {r().oid.slice(0, 7)}: {r().summary}
+                    </span>
+                  )}
+                </Show>
+              </div>
+              <Show when={commitError()}>
+                {(e) => <div class="banner banner--error">{e()}</div>}
+              </Show>
+            </section>
+          </>
         )}
+      </Show>
+
+      <DiffPanel diff={diff} />
+    </section>
+  );
+}
+
+function DiffPanel(props: { diff: Resource<RepoDiff> }) {
+  return (
+    <section class="diff-panel">
+      <header class="diff-panel__header">
+        <h2>Changes</h2>
+        <span class="agents__count">{(props.diff()?.files ?? []).length}</span>
+      </header>
+      <Show
+        when={(props.diff()?.files ?? []).length > 0}
+        fallback={<p class="empty">No working tree changes.</p>}
+      >
+        <For each={props.diff()?.files}>
+          {(file) => (
+            <article class="diff-file">
+              <header class="diff-file__header">
+                <code>{file.path}</code>
+                <span>
+                  +{file.additions} / -{file.deletions}
+                </span>
+              </header>
+              <Show when={file.patch}>
+                <pre class="diff-file__patch">{file.patch}</pre>
+              </Show>
+            </article>
+          )}
+        </For>
       </Show>
     </section>
   );

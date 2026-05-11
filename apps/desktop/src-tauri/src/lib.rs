@@ -4,7 +4,7 @@
 //! agent detection. Persistence lives in the platform app config dir.
 
 use opencherry_agents::DetectedAgent;
-use opencherry_core::{RepoId, RepoRef, RepoStatus};
+use opencherry_core::{CommitResult, RepoDiff, RepoId, RepoRef, RepoStatus};
 use opencherry_persistence as persist;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
@@ -34,8 +34,7 @@ fn config_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 #[tauri::command]
 fn list_repos(app: tauri::AppHandle) -> Result<Vec<RepoRef>, String> {
     let dir = config_dir(&app)?;
-    let cfg = persist::load(&dir).map_err(|e| e.to_string())?;
-    Ok(cfg.repos)
+    persist::list_repos(&dir).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -60,6 +59,16 @@ fn unregister_repo(app: tauri::AppHandle, id: String) -> Result<bool, String> {
 #[tauri::command]
 fn repo_status(path: String) -> Result<RepoStatus, String> {
     opencherry_repo::repo_status(Path::new(&path)).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn repo_diff(path: String) -> Result<RepoDiff, String> {
+    opencherry_repo::repo_diff(Path::new(&path)).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn commit_repo(path: String, message: String) -> Result<CommitResult, String> {
+    opencherry_repo::commit_all(Path::new(&path), &message).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -90,6 +99,8 @@ pub fn run() {
             register_repo,
             unregister_repo,
             repo_status,
+            repo_diff,
+            commit_repo,
             list_agents,
         ])
         .setup(|app| {

@@ -41,6 +41,7 @@ serde_json = "1"
 
 # Git (primary: git2 vendored libgit2; gix added later for batch reads)
 git2 = { version = "0.20", default-features = false, features = ["vendored-libgit2"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
 
 # Process detection
 sysinfo = "0.32"
