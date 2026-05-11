@@ -6,7 +6,7 @@ OpenCherry is an open source desktop app that lets you orchestrate many Git
 repositories across many AI coding agents (Claude Code, OpenCode, Codex,
 Gemini CLI, Aider, …) from a single VS Code Source Control–style interface.
 
-**Status:** pre-alpha, usable desktop shell with core multi-repo Git workflow.
+**Status:** alpha. Usable for the current multi-repo Git + agent-correlation MVP, with Ubuntu/GNOME as the primary target and rough edges still expected.
 
 ## Why
 
@@ -150,7 +150,7 @@ already shipped behavior.
 
 ## Roadmap
 
-- **Current focus:** deepen the existing Git UX and improve internal testability.
+- **Current focus:** stabilize the current alpha, deepen the existing Git UX, and improve internal testability.
 - **Next likely steps:**
   - discard/revert by file
   - stage/unstage by hunk
