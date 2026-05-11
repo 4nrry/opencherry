@@ -43,6 +43,12 @@ pub struct RepoRef {
     pub kind: TrackedTargetKind,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AgentTargetMatches {
+    pub repos: Vec<RepoRef>,
+    pub groups: Vec<RepoRef>,
+}
+
 /// Live status snapshot for a registered repository. Cheap to compute
 /// and safe to refresh on a timer.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -125,6 +131,7 @@ pub enum AgentKind {
     Codex,
     GeminiCli,
     Aider,
+    CopilotCli,
     Unknown,
 }
 
@@ -136,6 +143,7 @@ impl AgentKind {
             AgentKind::Codex => "Codex",
             AgentKind::GeminiCli => "Gemini CLI",
             AgentKind::Aider => "Aider",
+            AgentKind::CopilotCli => "Copilot CLI",
             AgentKind::Unknown => "Unknown",
         }
     }

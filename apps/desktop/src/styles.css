@@ -117,6 +117,14 @@ body,
   flex: 1;
 }
 
+.repo-list__badge {
+  font-size: 0.75rem;
+  padding: 0.1rem 0.45rem;
+  background: rgba(127, 127, 127, 0.18);
+  border-radius: 999px;
+  margin-left: 0.5rem;
+}
+
 .repo-list__remove {
   appearance: none;
   background: transparent;
@@ -279,6 +287,28 @@ body,
   border-radius: 6px;
 }
 
+.target-agents {
+  margin-bottom: 1rem;
+}
+
+.target-agents-inline {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  padding: 0 0.75rem 0.75rem;
+}
+
+.target-agent-chip {
+  font-size: 0.75rem;
+  padding: 0.1rem 0.45rem;
+  background: rgba(127, 127, 127, 0.14);
+  border: 1px solid var(--card-border);
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
 .agents__name {
   font-weight: 500;
   margin-bottom: 0.125rem;
@@ -366,6 +396,11 @@ body,
   color: #b91c1c;
 }
 
+.banner--warn {
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+}
+
 /* ------- Commit + diff ------- */
 
 .commit-box {
@@ -445,6 +480,8 @@ body,
 .diff-panel__header {
   display: flex;
   align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
   gap: 0.5rem;
   margin-bottom: 0.5rem;
 }
@@ -501,6 +538,21 @@ body,
   letter-spacing: 0.05em;
   font-size: 0.6875rem;
   opacity: 0.8;
+}
+
+.filter-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex-wrap: wrap;
+}
+
+.filter-toggle__button {
+  text-transform: lowercase;
+}
+
+.filter-toggle__button.is-active {
+  background: rgba(127, 127, 127, 0.18);
 }
 
 .diff-file__patch {

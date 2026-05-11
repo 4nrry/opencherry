@@ -117,8 +117,13 @@ fn sync_repo_changes(path: String) -> Result<RepoActionResult, String> {
 }
 
 #[tauri::command]
-fn list_agents() -> Vec<DetectedAgent> {
-    opencherry_agents::detect_running_agents()
+fn list_agents(app: tauri::AppHandle) -> Result<Vec<DetectedAgent>, String> {
+    let dir = config_dir(&app)?;
+    let repos = persist::list_repos(&dir).map_err(|e| e.to_string())?;
+    Ok(opencherry_agents::correlate_agents_to_targets(
+        opencherry_agents::detect_running_agents(),
+        &repos,
+    ))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

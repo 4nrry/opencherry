@@ -81,6 +81,7 @@ function createFixtures() {
   const syncPusherRepoPath = path.resolve(workspaceRoot, "sync-pusher-repo");
   const groupPath = path.resolve(workspaceRoot, "workspace-group");
   const childRepoPath = path.resolve(groupPath, "child-repo");
+  const childToolsRepoPath = path.resolve(groupPath, "tools-repo");
 
   fs.mkdirSync(workspaceRoot, { recursive: true });
   fs.mkdirSync(groupPath, { recursive: true });
@@ -88,6 +89,7 @@ function createFixtures() {
   createRepo(trackedRepoPath, "tracked.txt", "tracked base\n");
   createRepo(commitAllRepoPath, "all.txt", "commit all base\n");
   createRepo(childRepoPath, "child.txt", "child base\n");
+  createRepo(childToolsRepoPath, "tools.txt", "tools base\n");
 
   createBareRemote(publishRemotePath, workspaceRoot);
   createRepo(publishRepoPath, "publish.txt", "publish base\n");
@@ -112,6 +114,7 @@ function createFixtures() {
   fs.writeFileSync(path.resolve(publishRepoPath, "publish.txt"), "publish base\nlocal publish change\n", "utf8");
 
   fs.writeFileSync(path.resolve(childRepoPath, "child.txt"), "child base\nchild changed\n", "utf8");
+  fs.writeFileSync(path.resolve(childToolsRepoPath, "tools.txt"), "tools base\ntools changed\n", "utf8");
 
   writeLegacyRepos(configHome, [
     {
@@ -155,6 +158,7 @@ function createFixtures() {
       syncRepoPath,
       groupPath,
       childRepoPath,
+      childToolsRepoPath,
     };
 }
 
@@ -228,6 +232,13 @@ export const config: WebdriverIO.Config = {
   beforeSession: () => {
     const fixtures = createFixtures();
     fixtureRoot = fixtures.root;
+    process.env.OPENCHERRY_E2E_TRACKED_REPO_PATH = fixtures.trackedRepoPath;
+    process.env.OPENCHERRY_E2E_COMMIT_ALL_REPO_PATH = fixtures.commitAllRepoPath;
+    process.env.OPENCHERRY_E2E_PUBLISH_REPO_PATH = fixtures.publishRepoPath;
+    process.env.OPENCHERRY_E2E_SYNC_REPO_PATH = fixtures.syncRepoPath;
+    process.env.OPENCHERRY_E2E_GROUP_PATH = fixtures.groupPath;
+    process.env.OPENCHERRY_E2E_CHILD_REPO_PATH = fixtures.childRepoPath;
+    process.env.OPENCHERRY_E2E_CHILD_TOOLS_REPO_PATH = fixtures.childToolsRepoPath;
     tauriDriver = spawn(tauriDriverPath(), ["--native-driver", "/usr/bin/WebKitWebDriver"], {
       stdio: [null, process.stdout, process.stderr],
       env: {

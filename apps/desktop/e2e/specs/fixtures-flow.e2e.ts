@@ -10,6 +10,21 @@ function groupChildCard(repoName: string) {
   return $(`.diff-file[data-repo-path$="/${repoName}"]`);
 }
 
+function groupChildCheckbox(repoName: string) {
+  return groupChildCard(repoName).$('input[type="checkbox"]');
+}
+
+function groupFilterButton(filterName: "all" | "untracked" | "tracked" | "dirty") {
+  return $(`button=${filterName}`);
+}
+
+async function removeRepoIfTracked(repoName: string) {
+  const item = await repoListItem(repoName);
+  if (await item.isExisting()) {
+    await (await removeRepoButton(repoName)).click();
+  }
+}
+
 function diffFile(groupName: string, fileName: string) {
   return $(`.diff-group[data-diff-group="${groupName}"] .diff-file[data-file-path="${fileName}"]`);
 }
@@ -51,9 +66,89 @@ describe("OpenCherry desktop fixture flows", () => {
 
     await (await repoListItem("workspace-group")).click();
     await expect(await groupChildCard("child-repo")).not.toBeExisting();
-    await expect($(".diff-panel .empty")).toHaveText(
-      "No untracked child repositories to show for this folder.",
-    );
+    await expect(await groupChildCard("tools-repo")).toBeExisting();
+  });
+
+  it("tracks all visible child repos from the group view", async () => {
+    await (await removeRepoButton("child-repo")).click();
+    await (await repoListItem("workspace-group")).click();
+
+    await expect(await groupChildCard("child-repo")).toBeExisting();
+    await expect(await groupChildCard("tools-repo")).toBeExisting();
+    await expect($('button=Track all')).toBeExisting();
+
+    await (await $('button=Track all')).click();
+
+    await expect($(".repo-view__header h1")).toHaveText("tools-repo");
+    await expect(await repoListItem("child-repo")).toBeExisting();
+    await expect(await repoListItem("tools-repo")).toBeExisting();
+
+    await (await repoListItem("workspace-group")).click();
+    await expect(await groupChildCard("child-repo")).not.toBeExisting();
+    await expect(await groupChildCard("tools-repo")).not.toBeExisting();
+    await expect($(".diff-panel .empty")).toHaveText("No child repositories match this filter.");
+  });
+
+  it("tracks only selected child repos from the group view", async () => {
+    await (await removeRepoButton("child-repo")).click();
+    await (await removeRepoButton("tools-repo")).click();
+    await (await repoListItem("workspace-group")).click();
+
+    await expect(await groupChildCard("child-repo")).toBeExisting();
+    await expect(await groupChildCard("tools-repo")).toBeExisting();
+
+    await (await groupChildCheckbox("child-repo")).click();
+    await expect($('button=Track selected (1)')).toBeExisting();
+    await (await $('button=Track selected (1)')).click();
+
+    await expect($(".repo-view__header h1")).toHaveText("child-repo");
+    await expect(await repoListItem("child-repo")).toBeExisting();
+    await expect(await repoListItem("tools-repo")).not.toBeExisting();
+
+    await (await repoListItem("workspace-group")).click();
+    await expect(await groupChildCard("child-repo")).not.toBeExisting();
+    await expect(await groupChildCard("tools-repo")).toBeExisting();
+  });
+
+  it("filters child repositories by all, untracked, tracked, and dirty", async () => {
+    await removeRepoIfTracked("child-repo");
+    await removeRepoIfTracked("tools-repo");
+
+    await (await repoListItem("workspace-group")).click();
+    await expect(await groupChildCard("child-repo")).toBeExisting();
+    await expect(await groupChildCard("tools-repo")).toBeExisting();
+
+    await (await (await groupChildCard("child-repo")).$('button=Track')).click();
+    await expect($(".repo-view__header h1")).toHaveText("child-repo");
+
+    const message = await $(".commit-box__message");
+    await message.setValue("clean tracked child");
+    await (await $('button=Stage all + commit')).click();
+    await expect($(".commit-box__result")).toHaveText(expect.stringMatching(/clean tracked child/));
+
+    await (await repoListItem("workspace-group")).click();
+    await expect($(".diff-panel")).toHaveText(expect.stringMatching(/1 already tracked/i));
+
+    await expect(await groupChildCard("child-repo")).not.toBeExisting();
+    await expect(await groupChildCard("tools-repo")).toBeExisting();
+
+    await (await groupFilterButton("all")).click();
+    await expect(await groupChildCard("child-repo")).toBeExisting();
+    await expect(await groupChildCard("tools-repo")).toBeExisting();
+    await expect(await groupChildCard("child-repo")).toHaveText(expect.stringMatching(/tracked/i));
+
+    await (await groupFilterButton("tracked")).click();
+    await expect(await groupChildCard("child-repo")).toBeExisting();
+    await expect(await groupChildCard("tools-repo")).not.toBeExisting();
+    await expect(await groupChildCard("child-repo")).toHaveText(expect.not.stringMatching(/track\s*$/i));
+
+    await (await groupFilterButton("dirty")).click();
+    await expect(await groupChildCard("child-repo")).not.toBeExisting();
+    await expect(await groupChildCard("tools-repo")).toBeExisting();
+
+    await (await groupFilterButton("untracked")).click();
+    await expect(await groupChildCard("child-repo")).not.toBeExisting();
+    await expect(await groupChildCard("tools-repo")).toBeExisting();
   });
 
   it("supports stage, unstage, discard and commit on a real repo", async () => {

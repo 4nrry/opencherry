@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
+import { fireEvent, render, screen, waitFor, within } from "@solidjs/testing-library";
 import { createSignal, type Resource } from "solid-js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import App, { DiffGroup, DiffPanel, RepoPrimaryActionBar } from "./App";
@@ -279,6 +279,128 @@ describe("App", () => {
     expect(await screen.findByText("Committed abcdef0: ship it")).toBeInTheDocument();
   });
 
+  it("shows correlated agents for the selected repo", async () => {
+    const repoAgents: DetectedAgent[] = [
+      {
+        id: "agent-1",
+        kind: "open-code",
+        display_name: "OpenCode (pid 42)",
+        pid: 42,
+        cwd: "/repos/opencherry",
+        command_line: "opencode",
+        targets: {
+          repos: [repos[0]],
+          groups: [],
+        },
+      },
+    ];
+
+    invokeMock.mockImplementation((command: string) => {
+      switch (command) {
+        case "list_repos":
+          return Promise.resolve(repos);
+        case "list_agents":
+          return Promise.resolve(repoAgents);
+        case "repo_status":
+          return Promise.resolve(status);
+        case "repo_diff":
+          return Promise.resolve(diff);
+        case "repo_group_snapshot":
+          return Promise.resolve(groupSnapshot);
+        case "commit_repo":
+        case "commit_all_repo":
+          return Promise.resolve(commitResult);
+        case "publish_repo_branch":
+          return Promise.resolve({ summary: "Published main to origin" });
+        case "sync_repo_changes":
+          return Promise.resolve({ summary: "Synced main with origin" });
+        case "stage_repo_file":
+        case "unstage_repo_file":
+        case "discard_repo_file":
+        case "unregister_repo":
+        case "register_repo":
+          return Promise.resolve(undefined);
+        default:
+          throw new Error(`unexpected invoke ${command}`);
+      }
+    });
+
+    render(() => <App />);
+    await screen.findByText("opencherry");
+    fireEvent.click(screen.getByText("opencherry"));
+
+    const repoAgentsHeading = await screen.findByText("Agents in This Repo");
+    const repoAgentsPanel = repoAgentsHeading.closest("section");
+    expect(repoAgentsPanel).not.toBeNull();
+    expect(repoAgentsPanel).toHaveTextContent("OpenCode (pid 42)");
+    expect(repoAgentsPanel).toHaveTextContent("open-code");
+    expect(screen.getAllByText("1").length).toBeGreaterThan(0);
+  });
+
+  it("shows agent badges in the sidebar and warns on unmatched agents", async () => {
+    const mixedAgents: DetectedAgent[] = [
+      {
+        id: "agent-1",
+        kind: "open-code",
+        display_name: "OpenCode (pid 42)",
+        pid: 42,
+        cwd: "/repos/opencherry",
+        command_line: "opencode",
+        targets: {
+          repos: [repos[0]],
+          groups: [],
+        },
+      },
+      {
+        id: "agent-2",
+        kind: "gemini-cli",
+        display_name: "Gemini CLI (pid 77)",
+        pid: 77,
+        cwd: "/tmp/random",
+        command_line: "gemini --acp",
+        targets: {
+          repos: [],
+          groups: [],
+        },
+      },
+    ];
+
+    invokeMock.mockImplementation((command: string) => {
+      switch (command) {
+        case "list_repos":
+          return Promise.resolve(repos);
+        case "list_agents":
+          return Promise.resolve(mixedAgents);
+        case "repo_status":
+          return Promise.resolve(status);
+        case "repo_diff":
+          return Promise.resolve(diff);
+        case "repo_group_snapshot":
+          return Promise.resolve(groupSnapshot);
+        case "commit_repo":
+        case "commit_all_repo":
+          return Promise.resolve(commitResult);
+        case "publish_repo_branch":
+          return Promise.resolve({ summary: "Published main to origin" });
+        case "sync_repo_changes":
+          return Promise.resolve({ summary: "Synced main with origin" });
+        case "stage_repo_file":
+        case "unstage_repo_file":
+        case "discard_repo_file":
+        case "unregister_repo":
+        case "register_repo":
+          return Promise.resolve(undefined);
+        default:
+          throw new Error(`unexpected invoke ${command}`);
+      }
+    });
+
+    render(() => <App />);
+
+    expect(await screen.findByText("1 agent outside tracked repos/groups.")).toBeInTheDocument();
+    expect(screen.getAllByText("1").length).toBeGreaterThan(0);
+  });
+
   it("renders a group view with aggregated child repo data", async () => {
     render(() => <App />);
 
@@ -289,8 +411,294 @@ describe("App", () => {
     expect(screen.getByText("Dirty repos")).toBeInTheDocument();
     expect(screen.getByText("Repos")).toBeInTheDocument();
     expect(screen.getByText("Staged files")).toBeInTheDocument();
-    expect(screen.getByText("No untracked child repositories to show for this folder.")).toBeInTheDocument();
+    expect(screen.getByText("1 already tracked")).toBeInTheDocument();
+    expect(screen.getByText("No child repositories match this filter.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Track" })).not.toBeInTheDocument();
+  });
+
+  it("filters child repositories by all, untracked, tracked, and dirty", async () => {
+    const frontendRepo: RepoRef = {
+      id: "repo-2",
+      path: "/repos/acme/frontend",
+      display_name: "frontend",
+      kind: "repo",
+    };
+    const backendRepo: RepoRef = {
+      id: "repo-3",
+      path: "/repos/acme/backend",
+      display_name: "backend",
+      kind: "repo",
+    };
+    const cleanStatus = makeRepoStatus({ dirty: false });
+    const mixedChildren: RepoGroupSnapshot = {
+      ...groupSnapshot,
+      repos: [
+        ...groupSnapshot.repos,
+        {
+          repo: frontendRepo,
+          status,
+          changes: {
+            staged: 0,
+            unstaged: 1,
+            untracked: 0,
+            conflicted: 0,
+          },
+        },
+        {
+          repo: backendRepo,
+          status: cleanStatus,
+          changes: {
+            staged: 0,
+            unstaged: 0,
+            untracked: 0,
+            conflicted: 0,
+          },
+        },
+      ],
+      dirty_repos: 2,
+    };
+
+    invokeMock.mockImplementation((command: string) => {
+      switch (command) {
+        case "list_repos":
+          return Promise.resolve(repos);
+        case "list_agents":
+          return Promise.resolve(agents);
+        case "repo_status":
+          return Promise.resolve(status);
+        case "repo_diff":
+          return Promise.resolve(diff);
+        case "repo_group_snapshot":
+          return Promise.resolve(mixedChildren);
+        case "commit_repo":
+        case "commit_all_repo":
+          return Promise.resolve(commitResult);
+        case "publish_repo_branch":
+          return Promise.resolve({ summary: "Published main to origin" });
+        case "sync_repo_changes":
+          return Promise.resolve({ summary: "Synced main with origin" });
+        case "stage_repo_file":
+        case "unstage_repo_file":
+        case "discard_repo_file":
+        case "unregister_repo":
+        case "register_repo":
+          return Promise.resolve(undefined);
+        default:
+          throw new Error(`unexpected invoke ${command}`);
+      }
+    });
+
+    render(() => <App />);
+    await screen.findByText("[Group] acme");
+    fireEvent.click(screen.getByText("[Group] acme"));
+    const repoFilterTabs = await screen.findByRole("tablist", { name: "Child repository filters" });
+    const repoFilters = within(repoFilterTabs);
+
+    expect(await screen.findByText("frontend", { selector: "code" })).toBeInTheDocument();
+    expect(screen.getByText("backend", { selector: "code" })).toBeInTheDocument();
+    expect(screen.queryByText("opencherry", { selector: "code" })).not.toBeInTheDocument();
+
+    fireEvent.click(repoFilters.getByRole("tab", { name: "all" }));
+    expect(await screen.findByText("opencherry", { selector: "code" })).toBeInTheDocument();
+    expect(screen.getByText("frontend", { selector: "code" })).toBeInTheDocument();
+    expect(screen.getByText("backend", { selector: "code" })).toBeInTheDocument();
+    expect(screen.getAllByText("Tracked")).toHaveLength(1);
+
+    fireEvent.click(repoFilters.getByRole("tab", { name: "tracked" }));
+    expect(await screen.findByText("opencherry", { selector: "code" })).toBeInTheDocument();
+    expect(screen.queryByText("frontend", { selector: "code" })).not.toBeInTheDocument();
+    expect(screen.queryByText("backend", { selector: "code" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Track" })).not.toBeInTheDocument();
+
+    fireEvent.click(repoFilters.getByRole("tab", { name: "dirty" }));
+    expect(await screen.findByText("opencherry", { selector: "code" })).toBeInTheDocument();
+    expect(screen.getByText("frontend", { selector: "code" })).toBeInTheDocument();
+    expect(screen.queryByText("backend", { selector: "code" })).not.toBeInTheDocument();
+
+    fireEvent.click(repoFilters.getByRole("tab", { name: "untracked" }));
+    expect(await screen.findByText("frontend", { selector: "code" })).toBeInTheDocument();
+    expect(screen.getByText("backend", { selector: "code" })).toBeInTheDocument();
+    expect(screen.queryByText("opencherry", { selector: "code" })).not.toBeInTheDocument();
+  });
+
+  it("shows correlated agents for the selected group and child repos", async () => {
+    const frontendRepo: RepoRef = {
+      id: "repo-2",
+      path: "/repos/acme/frontend",
+      display_name: "frontend",
+      kind: "repo",
+    };
+    const groupAgents: DetectedAgent[] = [
+      {
+        id: "agent-1",
+        kind: "open-code",
+        display_name: "OpenCode (pid 42)",
+        pid: 42,
+        cwd: "/repos/acme/frontend",
+        command_line: "opencode",
+        targets: {
+          repos: [frontendRepo],
+          groups: [repos[1]],
+        },
+      },
+    ];
+    const extraChild: RepoGroupSnapshot = {
+      ...groupSnapshot,
+      repos: [
+        ...groupSnapshot.repos,
+        {
+          repo: frontendRepo,
+          status,
+          changes: {
+            staged: 0,
+            unstaged: 1,
+            untracked: 0,
+            conflicted: 0,
+          },
+        },
+      ],
+    };
+
+    invokeMock.mockImplementation((command: string) => {
+      switch (command) {
+        case "list_repos":
+          return Promise.resolve(repos);
+        case "list_agents":
+          return Promise.resolve(groupAgents);
+        case "repo_status":
+          return Promise.resolve(status);
+        case "repo_diff":
+          return Promise.resolve(diff);
+        case "repo_group_snapshot":
+          return Promise.resolve(extraChild);
+        case "commit_repo":
+        case "commit_all_repo":
+          return Promise.resolve(commitResult);
+        case "publish_repo_branch":
+          return Promise.resolve({ summary: "Published main to origin" });
+        case "sync_repo_changes":
+          return Promise.resolve({ summary: "Synced main with origin" });
+        case "stage_repo_file":
+        case "unstage_repo_file":
+        case "discard_repo_file":
+        case "unregister_repo":
+        case "register_repo":
+          return Promise.resolve(undefined);
+        default:
+          throw new Error(`unexpected invoke ${command}`);
+      }
+    });
+
+    render(() => <App />);
+    await screen.findByText("[Group] acme");
+    fireEvent.click(screen.getByText("[Group] acme"));
+
+    const groupAgentsHeading = await screen.findByText("Agents in This Group");
+    const groupAgentsPanel = groupAgentsHeading.closest("section");
+    expect(groupAgentsPanel).not.toBeNull();
+    expect(groupAgentsPanel).toHaveTextContent("OpenCode (pid 42)");
+    expect(screen.getByText("1 agent")).toBeInTheDocument();
+  });
+
+  it("filters child repositories by agent presence", async () => {
+    const frontendRepo: RepoRef = {
+      id: "repo-2",
+      path: "/repos/acme/frontend",
+      display_name: "frontend",
+      kind: "repo",
+    };
+    const backendRepo: RepoRef = {
+      id: "repo-3",
+      path: "/repos/acme/backend",
+      display_name: "backend",
+      kind: "repo",
+    };
+    const groupAgents: DetectedAgent[] = [
+      {
+        id: "agent-1",
+        kind: "open-code",
+        display_name: "OpenCode (pid 42)",
+        pid: 42,
+        cwd: "/repos/acme/frontend",
+        command_line: "opencode",
+        targets: {
+          repos: [frontendRepo],
+          groups: [repos[1]],
+        },
+      },
+    ];
+    const extraChildren: RepoGroupSnapshot = {
+      ...groupSnapshot,
+      repos: [
+        ...groupSnapshot.repos,
+        {
+          repo: frontendRepo,
+          status,
+          changes: {
+            staged: 0,
+            unstaged: 1,
+            untracked: 0,
+            conflicted: 0,
+          },
+        },
+        {
+          repo: backendRepo,
+          status,
+          changes: {
+            staged: 0,
+            unstaged: 0,
+            untracked: 0,
+            conflicted: 0,
+          },
+        },
+      ],
+    };
+
+    invokeMock.mockImplementation((command: string) => {
+      switch (command) {
+        case "list_repos":
+          return Promise.resolve(repos);
+        case "list_agents":
+          return Promise.resolve(groupAgents);
+        case "repo_status":
+          return Promise.resolve(status);
+        case "repo_diff":
+          return Promise.resolve(diff);
+        case "repo_group_snapshot":
+          return Promise.resolve(extraChildren);
+        case "commit_repo":
+        case "commit_all_repo":
+          return Promise.resolve(commitResult);
+        case "publish_repo_branch":
+          return Promise.resolve({ summary: "Published main to origin" });
+        case "sync_repo_changes":
+          return Promise.resolve({ summary: "Synced main with origin" });
+        case "stage_repo_file":
+        case "unstage_repo_file":
+        case "discard_repo_file":
+        case "unregister_repo":
+        case "register_repo":
+          return Promise.resolve(undefined);
+        default:
+          throw new Error(`unexpected invoke ${command}`);
+      }
+    });
+
+    render(() => <App />);
+    await screen.findByText("[Group] acme");
+    fireEvent.click(screen.getByText("[Group] acme"));
+    const agentFilterTabs = await screen.findByRole("tablist", { name: "Child repository agent filters" });
+    const agentFilters = within(agentFilterTabs);
+
+    expect(await screen.findByText("frontend", { selector: "code" })).toBeInTheDocument();
+
+    fireEvent.click(agentFilters.getByRole("tab", { name: "with-agents" }));
+    expect(await screen.findByText("frontend", { selector: "code" })).toBeInTheDocument();
+    expect(screen.queryByText("backend", { selector: "code" })).not.toBeInTheDocument();
+
+    fireEvent.click(agentFilters.getByRole("tab", { name: "without-agents" }));
+    expect(await screen.findByText("backend", { selector: "code" })).toBeInTheDocument();
+    expect(screen.queryByText("frontend", { selector: "code" })).not.toBeInTheDocument();
   });
 
   it("opens an unregistered child repo from the group view", async () => {
@@ -426,6 +834,197 @@ describe("App", () => {
         path: "/repos/acme/frontend",
       }),
     );
+    expect(await screen.findByText("frontend")).toBeInTheDocument();
+  });
+
+  it("tracks all visible child repos from the group view", async () => {
+    const frontendRepo: RepoRef = {
+      id: "repo-2",
+      path: "/repos/acme/frontend",
+      display_name: "frontend",
+      kind: "repo",
+    };
+    const backendRepo: RepoRef = {
+      id: "repo-3",
+      path: "/repos/acme/backend",
+      display_name: "backend",
+      kind: "repo",
+    };
+    const extraChildren: RepoGroupSnapshot = {
+      ...groupSnapshot,
+      repos: [
+        ...groupSnapshot.repos,
+        {
+          repo: frontendRepo,
+          status,
+          changes: {
+            staged: 0,
+            unstaged: 1,
+            untracked: 0,
+            conflicted: 0,
+          },
+        },
+        {
+          repo: backendRepo,
+          status,
+          changes: {
+            staged: 0,
+            unstaged: 2,
+            untracked: 1,
+            conflicted: 0,
+          },
+        },
+      ],
+    };
+
+    invokeMock.mockImplementation((command: string, payload?: { path?: string }) => {
+      switch (command) {
+        case "list_repos":
+          return Promise.resolve(repos);
+        case "list_agents":
+          return Promise.resolve(agents);
+        case "repo_status":
+          return Promise.resolve(status);
+        case "repo_diff":
+          return Promise.resolve(diff);
+        case "repo_group_snapshot":
+          return Promise.resolve(extraChildren);
+        case "register_repo":
+          return Promise.resolve({
+            id: payload?.path === backendRepo.path ? backendRepo.id : frontendRepo.id,
+            path: payload?.path,
+            display_name: payload?.path === backendRepo.path ? backendRepo.display_name : frontendRepo.display_name,
+            kind: "repo",
+          });
+        case "commit_repo":
+        case "commit_all_repo":
+          return Promise.resolve(commitResult);
+        case "publish_repo_branch":
+          return Promise.resolve({ summary: "Published main to origin" });
+        case "sync_repo_changes":
+          return Promise.resolve({ summary: "Synced main with origin" });
+        case "stage_repo_file":
+        case "unstage_repo_file":
+        case "discard_repo_file":
+        case "unregister_repo":
+          return Promise.resolve(undefined);
+        default:
+          throw new Error(`unexpected invoke ${command}`);
+      }
+    });
+
+    render(() => <App />);
+    await screen.findByText("[Group] acme");
+    fireEvent.click(screen.getByText("[Group] acme"));
+
+    expect(await screen.findByText("1 already tracked")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Track all" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Track all" }));
+
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("register_repo", {
+        path: "/repos/acme/frontend",
+      }),
+    );
+    expect(invokeMock).toHaveBeenCalledWith("register_repo", {
+      path: "/repos/acme/backend",
+    });
+    expect(await screen.findByText("backend")).toBeInTheDocument();
+  });
+
+  it("tracks only selected child repos from the group view", async () => {
+    const frontendRepo: RepoRef = {
+      id: "repo-2",
+      path: "/repos/acme/frontend",
+      display_name: "frontend",
+      kind: "repo",
+    };
+    const backendRepo: RepoRef = {
+      id: "repo-3",
+      path: "/repos/acme/backend",
+      display_name: "backend",
+      kind: "repo",
+    };
+    const extraChildren: RepoGroupSnapshot = {
+      ...groupSnapshot,
+      repos: [
+        {
+          repo: frontendRepo,
+          status,
+          changes: {
+            staged: 0,
+            unstaged: 1,
+            untracked: 0,
+            conflicted: 0,
+          },
+        },
+        {
+          repo: backendRepo,
+          status,
+          changes: {
+            staged: 0,
+            unstaged: 2,
+            untracked: 1,
+            conflicted: 0,
+          },
+        },
+      ],
+    };
+
+    invokeMock.mockImplementation((command: string, payload?: { path?: string }) => {
+      switch (command) {
+        case "list_repos":
+          return Promise.resolve(repos);
+        case "list_agents":
+          return Promise.resolve(agents);
+        case "repo_status":
+          return Promise.resolve(status);
+        case "repo_diff":
+          return Promise.resolve(diff);
+        case "repo_group_snapshot":
+          return Promise.resolve(extraChildren);
+        case "register_repo":
+          return Promise.resolve({
+            id: payload?.path === backendRepo.path ? backendRepo.id : frontendRepo.id,
+            path: payload?.path,
+            display_name: payload?.path === backendRepo.path ? backendRepo.display_name : frontendRepo.display_name,
+            kind: "repo",
+          });
+        case "commit_repo":
+        case "commit_all_repo":
+          return Promise.resolve(commitResult);
+        case "publish_repo_branch":
+          return Promise.resolve({ summary: "Published main to origin" });
+        case "sync_repo_changes":
+          return Promise.resolve({ summary: "Synced main with origin" });
+        case "stage_repo_file":
+        case "unstage_repo_file":
+        case "discard_repo_file":
+        case "unregister_repo":
+          return Promise.resolve(undefined);
+        default:
+          throw new Error(`unexpected invoke ${command}`);
+      }
+    });
+
+    render(() => <App />);
+    await screen.findByText("[Group] acme");
+    fireEvent.click(screen.getByText("[Group] acme"));
+
+    const checkboxes = await screen.findAllByRole("checkbox");
+    fireEvent.click(checkboxes[0]);
+
+    expect(await screen.findByRole("button", { name: "Track selected (1)" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Track selected (1)" }));
+
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("register_repo", {
+        path: "/repos/acme/frontend",
+      }),
+    );
+    expect(invokeMock).not.toHaveBeenCalledWith("register_repo", {
+      path: "/repos/acme/backend",
+    });
     expect(await screen.findByText("frontend")).toBeInTheDocument();
   });
 });

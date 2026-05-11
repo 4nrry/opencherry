@@ -4,8 +4,9 @@
 //! Matches by executable name and known argv patterns. Heuristics will
 //! be refined as we observe real users.
 
-use opencherry_core::{AgentId, AgentKind};
+use opencherry_core::{AgentId, AgentKind, AgentTargetMatches, RepoRef, TrackedTargetKind};
 use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
 use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, RefreshKind, System};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -18,6 +19,7 @@ pub struct DetectedAgent {
     pub cwd: Option<String>,
     /// Joined argv (best-effort, truncated for display).
     pub command_line: String,
+    pub targets: AgentTargetMatches,
 }
 
 #[derive(Debug, Clone)]
@@ -48,11 +50,12 @@ fn classify(exe_path: &str, exe_basename: &str, argv: &[&str]) -> Option<AgentKi
         "codex" => return Some(AgentKind::Codex),
         "gemini" => return Some(AgentKind::GeminiCli),
         "aider" => return Some(AgentKind::Aider),
+        "copilot" => return Some(AgentKind::CopilotCli),
         _ => {}
     }
 
     // Node/Python wrappers: inspect argv for the package entry point.
-    if matches!(exe.as_str(), "node" | "deno" | "bun" | "python" | "python3") {
+    if matches!(exe.as_str(), "node" | "deno" | "bun" | "python" | "python3" | "mainthread") {
         if joined.contains("@anthropic-ai/claude-code") || joined.contains("/claude-code/") {
             return Some(AgentKind::ClaudeCode);
         }
@@ -67,6 +70,9 @@ fn classify(exe_path: &str, exe_basename: &str, argv: &[&str]) -> Option<AgentKi
         }
         if joined.contains("aider") {
             return Some(AgentKind::Aider);
+        }
+        if joined.contains("copilot") || joined.contains("github-copilot") {
+            return Some(AgentKind::CopilotCli);
         }
     }
 
@@ -109,6 +115,47 @@ pub fn detect_running_agents() -> Vec<DetectedAgent> {
     collect_detected_agents(&snapshots)
 }
 
+pub fn correlate_agents_to_targets(agents: Vec<DetectedAgent>, targets: &[RepoRef]) -> Vec<DetectedAgent> {
+    agents
+        .into_iter()
+        .map(|mut agent| {
+            agent.targets = target_matches(agent.cwd.as_deref(), targets);
+            agent
+        })
+        .collect()
+}
+
+fn target_matches(cwd: Option<&str>, targets: &[RepoRef]) -> AgentTargetMatches {
+    let Some(cwd) = cwd else {
+        return AgentTargetMatches::default();
+    };
+    let cwd_path = Path::new(cwd);
+
+    let mut repos = Vec::new();
+    let mut groups = Vec::new();
+    for target in targets {
+        if path_contains(cwd_path, &target.path) {
+            match target.kind {
+                TrackedTargetKind::Repo => repos.push(target.clone()),
+                TrackedTargetKind::Group => groups.push(target.clone()),
+            }
+        }
+    }
+
+    repos.sort_by(|a, b| a.path.cmp(&b.path));
+    groups.sort_by(|a, b| {
+        let a_depth = a.path.components().count();
+        let b_depth = b.path.components().count();
+        b_depth.cmp(&a_depth).then_with(|| a.path.cmp(&b.path))
+    });
+
+    AgentTargetMatches { repos, groups }
+}
+
+fn path_contains(path: &Path, base: &PathBuf) -> bool {
+    path == base || path.starts_with(base)
+}
+
 fn collect_detected_agents(processes: &[ProcessSnapshot]) -> Vec<DetectedAgent> {
     let mut out = Vec::new();
     for process in processes {
@@ -144,6 +191,7 @@ fn collect_detected_agents(processes: &[ProcessSnapshot]) -> Vec<DetectedAgent> 
             pid: pid_u32,
             cwd: process.cwd.clone(),
             command_line,
+            targets: AgentTargetMatches::default(),
         });
     }
 
@@ -190,6 +238,10 @@ mod tests {
             classify("/usr/bin/python3", "python3", &["python3", "-m", "aider"]),
             Some(AgentKind::Aider)
         );
+        assert_eq!(
+            classify("/usr/bin/copilot", "copilot", &["copilot"]),
+            Some(AgentKind::CopilotCli)
+        );
     }
 
     #[test]
@@ -217,6 +269,73 @@ mod tests {
         assert_eq!(agents[0].kind, AgentKind::Codex);
         assert_eq!(agents[1].pid, 400);
         assert_eq!(agents[1].kind, AgentKind::OpenCode);
+    }
+
+    #[test]
+    fn correlate_agents_matches_repo_and_group_from_cwd() {
+        let workspace = PathBuf::from("/workspace");
+        let group = RepoRef {
+            id: opencherry_core::RepoId("group:/workspace".into()),
+            path: workspace.clone(),
+            display_name: "workspace".into(),
+            kind: TrackedTargetKind::Group,
+        };
+        let repo = RepoRef {
+            id: opencherry_core::RepoId("repo:/workspace/app".into()),
+            path: workspace.join("app"),
+            display_name: "app".into(),
+            kind: TrackedTargetKind::Repo,
+        };
+        let other_repo = RepoRef {
+            id: opencherry_core::RepoId("repo:/other".into()),
+            path: PathBuf::from("/other"),
+            display_name: "other".into(),
+            kind: TrackedTargetKind::Repo,
+        };
+
+        let agents = correlate_agents_to_targets(
+            collect_detected_agents(&[ProcessSnapshot {
+                pid: 123,
+                exe_path: "/usr/bin/opencode".into(),
+                exe_basename: "opencode".into(),
+                argv: vec!["opencode".into()],
+                cwd: Some("/workspace/app/src".into()),
+                is_thread: false,
+            }]),
+            &[other_repo, repo.clone(), group.clone()],
+        );
+
+        assert_eq!(agents.len(), 1);
+        assert_eq!(agents[0].targets.repos.len(), 1);
+        assert_eq!(agents[0].targets.repos[0].path, repo.path);
+        assert_eq!(agents[0].targets.groups.len(), 1);
+        assert_eq!(agents[0].targets.groups[0].path, group.path);
+    }
+
+    #[test]
+    fn correlate_agents_skips_targets_when_cwd_missing() {
+        let repo = RepoRef {
+            id: opencherry_core::RepoId("repo:/workspace/app".into()),
+            path: PathBuf::from("/workspace/app"),
+            display_name: "app".into(),
+            kind: TrackedTargetKind::Repo,
+        };
+
+        let agents = correlate_agents_to_targets(
+            collect_detected_agents(&[ProcessSnapshot {
+                pid: 123,
+                exe_path: "/usr/bin/opencode".into(),
+                exe_basename: "opencode".into(),
+                argv: vec!["opencode".into()],
+                cwd: None,
+                is_thread: false,
+            }]),
+            &[repo],
+        );
+
+        assert_eq!(agents.len(), 1);
+        assert!(agents[0].targets.repos.is_empty());
+        assert!(agents[0].targets.groups.is_empty());
     }
 
     #[test]

@@ -70,6 +70,7 @@ export type AgentKind =
   | "codex"
   | "gemini-cli"
   | "aider"
+  | "copilot-cli"
   | "unknown";
 
 export interface DetectedAgent {
@@ -79,4 +80,10 @@ export interface DetectedAgent {
   pid: number;
   cwd: string | null;
   command_line: string;
+  targets: AgentTargetMatches;
+}
+
+export interface AgentTargetMatches {
+  repos: RepoRef[];
+  groups: RepoRef[];
 }

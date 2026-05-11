@@ -1,6 +1,7 @@
 import {
   createSignal,
   createResource,
+  createEffect,
   For,
   Show,
   onCleanup,
@@ -18,6 +19,16 @@ import type {
   RepoRef,
   RepoStatus,
 } from "./types";
+
+type GroupRepoFilter = "all" | "untracked" | "tracked" | "dirty";
+type GroupAgentFilter = "all" | "with-agents" | "without-agents";
+
+function agentMatchesRepoPath(agent: DetectedAgent, repoPath: string) {
+  return (
+    agent.targets.repos.some((repo) => repo.path === repoPath) ||
+    (agent.cwd !== null && (agent.cwd === repoPath || agent.cwd.startsWith(`${repoPath}/`)))
+  );
+}
 
 async function fetchRepos(): Promise<RepoRef[]> {
   return await invoke<RepoRef[]>("list_repos");
@@ -79,6 +90,13 @@ export default function App() {
   const [error, setError] = createSignal<string | null>(null);
   const trackedRepoPaths = () =>
     new Set((repos() ?? []).filter((repo) => repo.kind === "repo").map((repo) => repo.path));
+  const repoAgentCount = (repo: RepoRef) =>
+    (agents() ?? []).filter((agent) => {
+      if (repo.kind === "group") {
+        return agent.targets.groups.some((group) => group.path === repo.path);
+      }
+      return agentMatchesRepoPath(agent, repo.path);
+    }).length;
 
   // Poll agents every 3s.
   let agentsTimer: ReturnType<typeof setInterval> | undefined;
@@ -141,6 +159,9 @@ export default function App() {
                     {r.kind === "group" ? "[Group] " : ""}
                     {r.display_name}
                   </span>
+                  <Show when={repoAgentCount(r) > 0}>
+                    <span class="repo-list__badge">{repoAgentCount(r)}</span>
+                  </Show>
                   <button
                     class="repo-list__remove"
                     data-remove-repo-path={r.path}
@@ -172,9 +193,10 @@ export default function App() {
             </div>
           }
         >
-          <Show when={selected()?.kind === "group"} fallback={<RepoView repo={selected()!} />}>
+          <Show when={selected()?.kind === "group"} fallback={<RepoView repo={selected()!} agents={agents() ?? []} />}>
             <RepoGroupView
               group={selected()!}
+              agents={agents() ?? []}
               trackedRepoPaths={trackedRepoPaths()}
               onRegisterRepo={async (repo) => {
                 setError(null);
@@ -182,6 +204,19 @@ export default function App() {
                   const registered = await invoke<RepoRef>("register_repo", { path: repo.path });
                   await refetchRepos();
                   setSelected(registered);
+                } catch (e) {
+                  setError(String(e));
+                }
+              }}
+              onRegisterRepos={async (groupRepos) => {
+                setError(null);
+                try {
+                  let lastRegistered: RepoRef | null = null;
+                  for (const repo of groupRepos) {
+                    lastRegistered = await invoke<RepoRef>("register_repo", { path: repo.path });
+                  }
+                  await refetchRepos();
+                  if (lastRegistered) setSelected(lastRegistered);
                 } catch (e) {
                   setError(String(e));
                 }
@@ -206,16 +241,78 @@ export default function App() {
 
 function RepoGroupView(props: {
   group: RepoRef;
+  agents: DetectedAgent[];
   trackedRepoPaths: Set<string>;
   onRegisterRepo: (repo: RepoRef) => Promise<void>;
+  onRegisterRepos: (repos: RepoRef[]) => Promise<void>;
   onSelectRepo: (repo: RepoRef) => void;
 }) {
   const [snapshot, { refetch }] = createResource(
     () => props.group.path,
     (p) => fetchGroupSnapshot(p),
   );
-  const visibleRepos = () =>
-    (snapshot()?.repos ?? []).filter((entry) => !props.trackedRepoPaths.has(entry.repo.path));
+  const [filter, setFilter] = createSignal<GroupRepoFilter>("untracked");
+  const [agentFilter, setAgentFilter] = createSignal<GroupAgentFilter>("all");
+  const isTrackedRepo = (repoPath: string) => props.trackedRepoPaths.has(repoPath);
+  const isDirtyRepo = (entry: RepoGroupSnapshot["repos"][number]) =>
+    entry.changes.staged + entry.changes.unstaged + entry.changes.untracked + entry.changes.conflicted > 0;
+  const filteredRepos = () => {
+    const repos = snapshot()?.repos ?? [];
+    const repoFiltered = (() => {
+      switch (filter()) {
+        case "all":
+          return repos;
+        case "tracked":
+          return repos.filter((entry) => isTrackedRepo(entry.repo.path));
+        case "dirty":
+          return repos.filter((entry) => isDirtyRepo(entry));
+        case "untracked":
+        default:
+          return repos.filter((entry) => !isTrackedRepo(entry.repo.path));
+      }
+    })();
+
+    switch (agentFilter()) {
+      case "all":
+        return repoFiltered;
+      case "with-agents":
+        return repoFiltered.filter((entry) => repoAgents(entry.repo.path).length > 0);
+      case "without-agents":
+        return repoFiltered.filter((entry) => repoAgents(entry.repo.path).length === 0);
+      default:
+        return repoFiltered;
+    }
+  };
+  const trackableVisibleRepos = () => filteredRepos().filter((entry) => !isTrackedRepo(entry.repo.path));
+  const trackedReposCount = () => (snapshot()?.repos ?? []).filter((entry) => isTrackedRepo(entry.repo.path)).length;
+  const groupAgents = () => props.agents.filter((agent) => agent.targets.groups.some((group) => group.path === props.group.path));
+  const repoAgents = (repoPath: string) => props.agents.filter((agent) => agentMatchesRepoPath(agent, repoPath));
+  const [selectedRepoPaths, setSelectedRepoPaths] = createSignal<Set<string>>(new Set());
+  const selectedRepos = () =>
+    trackableVisibleRepos()
+      .filter((entry) => selectedRepoPaths().has(entry.repo.path))
+      .map((entry) => entry.repo);
+
+  createEffect(() => {
+    const visiblePaths = new Set(trackableVisibleRepos().map((entry) => entry.repo.path));
+    setSelectedRepoPaths((current) => {
+      const next = new Set([...current].filter((path) => visiblePaths.has(path)));
+      if (next.size === current.size) return current;
+      return next;
+    });
+  });
+
+  function toggleRepoSelection(repoPath: string, checked: boolean) {
+    setSelectedRepoPaths((current) => {
+      const next = new Set(current);
+      if (checked) {
+        next.add(repoPath);
+      } else {
+        next.delete(repoPath);
+      }
+      return next;
+    });
+  }
 
   let timer: ReturnType<typeof setInterval> | undefined;
   onMount(() => {
@@ -254,19 +351,75 @@ function RepoGroupView(props: {
               <StatusCard label="Staged files" value={String(group().totals.staged)} />
               <StatusCard label="Unstaged files" value={String(group().totals.unstaged)} />
               <StatusCard label="Untracked files" value={String(group().totals.untracked)} />
+              <StatusCard label="Agents" value={String(groupAgents().length)} tone={groupAgents().length > 0 ? "ok" : undefined} />
             </div>
+
+            <TargetAgentsPanel
+              title="Agents in This Group"
+              agents={groupAgents()}
+              empty="No detected agents mapped to this group."
+            />
 
             <section class="diff-panel">
               <header class="diff-panel__header">
                 <h2>Child repositories</h2>
-                <span class="agents__count">{visibleRepos().length}</span>
+                <div class="diff-panel__actions">
+                  <span class="agents__count">{filteredRepos().length}</span>
+                  <Show when={trackedReposCount() > 0}>
+                    <span class="agents__count">{trackedReposCount()} already tracked</span>
+                  </Show>
+                  <div class="filter-toggle" role="tablist" aria-label="Child repository filters">
+                    <For each={["all", "untracked", "tracked", "dirty"] as const}>
+                      {(value) => (
+                        <button
+                          class={`btn btn--tiny filter-toggle__button${filter() === value ? " is-active" : ""}`}
+                          role="tab"
+                          aria-selected={filter() === value}
+                          onClick={() => setFilter(value)}
+                        >
+                          {value}
+                        </button>
+                      )}
+                    </For>
+                  </div>
+                  <div class="filter-toggle" role="tablist" aria-label="Child repository agent filters">
+                    <For each={["all", "with-agents", "without-agents"] as const}>
+                      {(value) => (
+                        <button
+                          class={`btn btn--tiny filter-toggle__button${agentFilter() === value ? " is-active" : ""}`}
+                          role="tab"
+                          aria-selected={agentFilter() === value}
+                          onClick={() => setAgentFilter(value)}
+                        >
+                          {value}
+                        </button>
+                      )}
+                    </For>
+                  </div>
+                  <Show when={selectedRepos().length > 0}>
+                    <button
+                      class="btn btn--tiny"
+                      onClick={() => void props.onRegisterRepos(selectedRepos())}
+                    >
+                      Track selected ({selectedRepos().length})
+                    </button>
+                  </Show>
+                  <Show when={trackableVisibleRepos().length > 1}>
+                    <button
+                      class="btn btn--tiny"
+                      onClick={() => void props.onRegisterRepos(trackableVisibleRepos().map((entry) => entry.repo))}
+                    >
+                      Track all
+                    </button>
+                  </Show>
+                </div>
               </header>
               <Show
-                when={visibleRepos().length > 0}
-                fallback={<p class="empty">No untracked child repositories to show for this folder.</p>}
+                when={filteredRepos().length > 0}
+                fallback={<p class="empty">No child repositories match this filter.</p>}
               >
                 <div class="diff-group">
-                  <For each={visibleRepos()}>
+                  <For each={filteredRepos()}>
                     {(entry) => (
                       <article
                         class="diff-file"
@@ -275,25 +428,48 @@ function RepoGroupView(props: {
                       >
                         <header class="diff-file__header">
                           <div class="diff-file__title">
+                            <Show when={!isTrackedRepo(entry.repo.path)}>
+                              <input
+                                type="checkbox"
+                                checked={selectedRepoPaths().has(entry.repo.path)}
+                                onClick={(e) => e.stopPropagation()}
+                                onChange={(e) => toggleRepoSelection(entry.repo.path, e.currentTarget.checked)}
+                              />
+                            </Show>
                             <code>{entry.repo.display_name}</code>
                             <span class="diff-file__status">{entry.status.branch ?? "(detached)"}</span>
+                            <Show when={isTrackedRepo(entry.repo.path)}>
+                              <span class="agents__count">Tracked</span>
+                            </Show>
                           </div>
                           <div class="diff-file__actions">
                             <span>
                               S:{entry.changes.staged} U:{entry.changes.unstaged} N:{entry.changes.untracked} C:{entry.changes.conflicted}
                             </span>
-                            <button
-                              class="btn btn--tiny"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                void props.onRegisterRepo(entry.repo);
-                              }}
-                            >
-                              Track
-                            </button>
+                            <Show when={!isTrackedRepo(entry.repo.path)}>
+                              <button
+                                class="btn btn--tiny"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  void props.onRegisterRepo(entry.repo);
+                                }}
+                              >
+                                Track
+                              </button>
+                            </Show>
                           </div>
                         </header>
                         <code class="repo-view__path">{entry.repo.path}</code>
+                        <Show when={repoAgents(entry.repo.path).length > 0}>
+                          <div class="target-agents-inline">
+                            <span class="agents__count">
+                              {repoAgents(entry.repo.path).length} agent{repoAgents(entry.repo.path).length === 1 ? "" : "s"}
+                            </span>
+                            <For each={repoAgents(entry.repo.path)}>
+                              {(agent) => <span class="target-agent-chip">{agent.kind}</span>}
+                            </For>
+                          </div>
+                        </Show>
                       </article>
                     )}
                   </For>
@@ -307,7 +483,7 @@ function RepoGroupView(props: {
   );
 }
 
-function RepoView(props: { repo: RepoRef }) {
+function RepoView(props: { repo: RepoRef; agents: DetectedAgent[] }) {
   const [status, { refetch }] = createResource(
     () => props.repo.path,
     (p) => fetchStatus(p),
@@ -320,6 +496,7 @@ function RepoView(props: { repo: RepoRef }) {
   const [commitError, setCommitError] = createSignal<string | null>(null);
   const [commitResult, setCommitResult] = createSignal<CommitResult | null>(null);
   const [actionResult, setActionResult] = createSignal<string | null>(null);
+  const repoAgents = () => props.agents.filter((agent) => agentMatchesRepoPath(agent, props.repo.path));
 
   // Refresh status every 5s while this repo is selected.
   let timer: ReturnType<typeof setInterval> | undefined;
@@ -436,7 +613,14 @@ function RepoView(props: { repo: RepoRef }) {
                     : "—"
                 }
               />
+              <StatusCard label="Agents" value={String(repoAgents().length)} tone={repoAgents().length > 0 ? "ok" : undefined} />
             </div>
+
+            <TargetAgentsPanel
+              title="Agents in This Repo"
+              agents={repoAgents()}
+              empty="No detected agents mapped to this repository."
+            />
 
             <section class="commit-box">
               <textarea
@@ -668,13 +852,52 @@ function StatusCard(props: {
   );
 }
 
+function TargetAgentsPanel(props: { title: string; agents: DetectedAgent[]; empty: string }) {
+  return (
+    <section class="agents target-agents">
+      <header class="agents__header">
+        <h2>{props.title}</h2>
+        <span class="agents__count">{props.agents.length}</span>
+      </header>
+      <Show
+        when={props.agents.length > 0}
+        fallback={<p class="empty">{props.empty}</p>}
+      >
+        <ul class="agents__list">
+          <For each={props.agents}>
+            {(a) => (
+              <li class="agents__item">
+                <div class="agents__name">{a.display_name}</div>
+                <div class="agents__meta">
+                  <span class="agents__kind">{a.kind}</span>
+                  <Show when={a.cwd}>
+                    {(cwd) => <code class="agents__cwd">{cwd()}</code>}
+                  </Show>
+                </div>
+              </li>
+            )}
+          </For>
+        </ul>
+      </Show>
+    </section>
+  );
+}
+
 function AgentsPanel(props: { agents: Resource<DetectedAgent[]> }) {
+  const unmatchedAgents = () =>
+    (props.agents() ?? []).filter((agent) => agent.targets.repos.length === 0 && agent.targets.groups.length === 0);
+
   return (
     <section class="agents">
       <header class="agents__header">
         <h2>Detected agents</h2>
         <span class="agents__count">{(props.agents() ?? []).length}</span>
       </header>
+      <Show when={unmatchedAgents().length > 0}>
+        <div class="banner banner--warn">
+          {unmatchedAgents().length} agent{unmatchedAgents().length === 1 ? "" : "s"} outside tracked repos/groups.
+        </div>
+      </Show>
       <Show
         when={(props.agents() ?? []).length > 0}
         fallback={

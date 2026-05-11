@@ -54,7 +54,28 @@ fn migrate(conn: &Connection) -> anyhow::Result<()> {
         END;
         "#,
     )?;
+
+    if !repos_has_column(conn, "kind")? {
+        conn.execute(
+            "ALTER TABLE repos ADD COLUMN kind TEXT NOT NULL DEFAULT 'repo'",
+            [],
+        )?;
+    }
+
     Ok(())
+}
+
+fn repos_has_column(conn: &Connection, column_name: &str) -> anyhow::Result<bool> {
+    let mut stmt = conn.prepare("PRAGMA table_info(repos)")?;
+    let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
+
+    for row in rows {
+        if row? == column_name {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
 }
 
 fn import_legacy_json(config_dir: &Path, conn: &Connection) -> anyhow::Result<()> {
@@ -341,5 +362,49 @@ mod tests {
         assert!(remove_repo(config_dir.path(), &legacy_repo.id).unwrap());
         let repos = list_repos(config_dir.path()).unwrap();
         assert!(repos.is_empty());
+    }
+
+    #[test]
+    fn migrates_existing_repos_table_to_add_kind_column() {
+        let config_dir = TestDir::new("persistence-migrate-kind-config");
+        let repos_root = TestDir::new("persistence-migrate-kind-repos");
+        let legacy_repo_dir = repos_root.path().join("legacy-repo");
+        let group_dir = repos_root.path().join("workspace-group");
+        fs::create_dir_all(&legacy_repo_dir).unwrap();
+        fs::create_dir_all(&group_dir).unwrap();
+
+        let legacy_repo_path = legacy_repo_dir.canonicalize().unwrap();
+        let db = Connection::open(db_path(config_dir.path())).unwrap();
+        db.execute_batch(
+            r#"
+            CREATE TABLE repos (
+                id TEXT PRIMARY KEY NOT NULL,
+                path TEXT NOT NULL UNIQUE,
+                display_name TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            "#,
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO repos (id, path, display_name) VALUES (?1, ?2, ?3)",
+            params!["legacy-repo", legacy_repo_path.to_string_lossy().to_string(), "legacy-repo"],
+        )
+        .unwrap();
+        drop(db);
+
+        let repos = list_repos(config_dir.path()).unwrap();
+        assert_eq!(repos.len(), 1);
+        assert_eq!(repos[0].display_name, "legacy-repo");
+        assert_eq!(repos[0].kind, TrackedTargetKind::Repo);
+
+        let added_group = add_repo(config_dir.path(), &group_dir, TrackedTargetKind::Group).unwrap();
+        assert_eq!(added_group.kind, TrackedTargetKind::Group);
+
+        let repos = list_repos(config_dir.path()).unwrap();
+        assert_eq!(repos.len(), 2);
+        assert!(repos.iter().any(|repo| repo.display_name == "legacy-repo" && repo.kind == TrackedTargetKind::Repo));
+        assert!(repos.iter().any(|repo| repo.display_name == "workspace-group" && repo.kind == TrackedTargetKind::Group));
     }
 }
