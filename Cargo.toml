@@ -5,6 +5,7 @@ members = [
     "crates/opencherry_core",
     "crates/opencherry_repo",
     "crates/opencherry_agents",
+    "crates/opencherry_persistence",
 ]
 
 [workspace.package]
@@ -20,6 +21,7 @@ rust-version = "1.80"
 opencherry_core = { path = "crates/opencherry_core" }
 opencherry_repo = { path = "crates/opencherry_repo" }
 opencherry_agents = { path = "crates/opencherry_agents" }
+opencherry_persistence = { path = "crates/opencherry_persistence" }
 
 # Tauri 2
 tauri = { version = "2", features = [] }

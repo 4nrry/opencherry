@@ -2421,8 +2421,10 @@ name = "opencherry-desktop"
 version = "0.0.1"
 dependencies = [
  "anyhow",
+ "git2",
  "opencherry_agents",
  "opencherry_core",
+ "opencherry_persistence",
  "opencherry_repo",
  "serde",
  "serde_json",
@@ -2453,6 +2455,18 @@ version = "0.0.1"
 dependencies = [
  "serde",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "opencherry_persistence"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "opencherry_core",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tracing",
 ]
 
 [[package]]

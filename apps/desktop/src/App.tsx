@@ -1,52 +1,241 @@
-import { createSignal, Show } from "solid-js";
+import {
+  createSignal,
+  createResource,
+  For,
+  Show,
+  onCleanup,
+  onMount,
+  type Resource,
+} from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
+import type { DetectedAgent, RepoRef, RepoStatus } from "./types";
 
-interface PingResponse {
-  message: string;
-  core_version: string;
+async function fetchRepos(): Promise<RepoRef[]> {
+  return await invoke<RepoRef[]>("list_repos");
+}
+
+async function fetchAgents(): Promise<DetectedAgent[]> {
+  return await invoke<DetectedAgent[]>("list_agents");
+}
+
+async function fetchStatus(path: string): Promise<RepoStatus> {
+  return await invoke<RepoStatus>("repo_status", { path });
 }
 
 export default function App() {
-  const [response, setResponse] = createSignal<PingResponse | null>(null);
+  const [repos, { refetch: refetchRepos }] = createResource(fetchRepos);
+  const [agents, { refetch: refetchAgents }] = createResource(fetchAgents);
+  const [selected, setSelected] = createSignal<RepoRef | null>(null);
   const [error, setError] = createSignal<string | null>(null);
 
-  async function ping() {
+  // Poll agents every 3s.
+  let agentsTimer: ReturnType<typeof setInterval> | undefined;
+  onMount(() => {
+    agentsTimer = setInterval(() => refetchAgents(), 3000);
+  });
+  onCleanup(() => {
+    if (agentsTimer) clearInterval(agentsTimer);
+  });
+
+  async function addRepo() {
     setError(null);
     try {
-      const r = await invoke<PingResponse>("ping", { name: "anrry" });
-      setResponse(r);
+      const picked = await open({
+        directory: true,
+        multiple: false,
+        title: "Select a Git repository",
+      });
+      if (!picked || typeof picked !== "string") return;
+      await invoke<RepoRef>("register_repo", { path: picked });
+      await refetchRepos();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function removeRepo(repo: RepoRef) {
+    setError(null);
+    try {
+      await invoke<boolean>("unregister_repo", { id: repo.id });
+      if (selected()?.id === repo.id) setSelected(null);
+      await refetchRepos();
     } catch (e) {
       setError(String(e));
     }
   }
 
   return (
-    <main class="shell">
-      <header class="shell__header">
-        <h1>OpenCherry</h1>
-        <p class="shell__tagline">
-          Multi-repo &times; multi-agent control tower &mdash; pre-alpha shell.
-        </p>
-      </header>
+    <div class="layout">
+      <aside class="sidebar">
+        <div class="sidebar__header">
+          <h2>Repositories</h2>
+          <button class="btn btn--small" onClick={addRepo} title="Add a repository">
+            +
+          </button>
+        </div>
+        <Show
+          when={(repos() ?? []).length > 0}
+          fallback={<p class="empty">No repos yet. Click + to add one.</p>}
+        >
+          <ul class="repo-list">
+            <For each={repos()}>
+              {(r) => (
+                <li
+                  class={`repo-list__item${selected()?.id === r.id ? " is-selected" : ""}`}
+                  onClick={() => setSelected(r)}
+                >
+                  <span class="repo-list__name">{r.display_name}</span>
+                  <button
+                    class="repo-list__remove"
+                    title="Remove from OpenCherry"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void removeRepo(r);
+                    }}
+                  >
+                    ×
+                  </button>
+                </li>
+              )}
+            </For>
+          </ul>
+        </Show>
+      </aside>
 
-      <section class="shell__body">
-        <button class="btn" onClick={ping}>
-          Ping Rust core
-        </button>
-
-        <Show when={response()}>
-          {(r) => (
-            <pre class="result">
-              {r().message}
-              {"\n"}core v{r().core_version}
-            </pre>
-          )}
+      <main class="main">
+        <Show
+          when={selected()}
+          fallback={
+            <div class="placeholder">
+              <h1>OpenCherry</h1>
+              <p>Multi-repo &times; multi-agent control tower.</p>
+              <p class="placeholder__hint">
+                Select a repository on the left, or add a new one with the + button.
+              </p>
+            </div>
+          }
+        >
+          {(repo) => <RepoView repo={repo()} />}
         </Show>
 
         <Show when={error()}>
-          {(e) => <pre class="result result--error">{e()}</pre>}
+          {(e) => <div class="banner banner--error">{e()}</div>}
         </Show>
-      </section>
-    </main>
+
+        <AgentsPanel agents={agents} />
+      </main>
+    </div>
+  );
+}
+
+function RepoView(props: { repo: RepoRef }) {
+  const [status, { refetch }] = createResource(
+    () => props.repo.path,
+    (p) => fetchStatus(p),
+  );
+
+  // Refresh status every 5s while this repo is selected.
+  let timer: ReturnType<typeof setInterval> | undefined;
+  onMount(() => {
+    timer = setInterval(() => refetch(), 5000);
+  });
+  onCleanup(() => {
+    if (timer) clearInterval(timer);
+  });
+
+  return (
+    <section class="repo-view">
+      <header class="repo-view__header">
+        <h1>{props.repo.display_name}</h1>
+        <code class="repo-view__path">{props.repo.path}</code>
+      </header>
+
+      <Show
+        when={status()}
+        fallback={
+          <Show when={status.error} fallback={<p>Loading status…</p>}>
+            <pre class="banner banner--error">{String(status.error)}</pre>
+          </Show>
+        }
+      >
+        {(s) => (
+          <div class="status-grid">
+            <StatusCard label="Branch" value={s().branch ?? "(detached)"} />
+            <StatusCard label="HEAD" value={s().head_short ?? "—"} mono />
+            <StatusCard
+              label="Working tree"
+              value={s().dirty ? "dirty" : "clean"}
+              tone={s().dirty ? "warn" : "ok"}
+            />
+            <StatusCard
+              label="Upstream"
+              value={s().upstream ?? "(none)"}
+              mono
+            />
+            <StatusCard
+              label="Ahead / Behind"
+              value={
+                s().ahead !== null && s().behind !== null
+                  ? `↑${s().ahead}  ↓${s().behind}`
+                  : "—"
+              }
+            />
+          </div>
+        )}
+      </Show>
+    </section>
+  );
+}
+
+function StatusCard(props: {
+  label: string;
+  value: string;
+  mono?: boolean;
+  tone?: "ok" | "warn";
+}) {
+  return (
+    <div class={`card${props.tone ? ` card--${props.tone}` : ""}`}>
+      <div class="card__label">{props.label}</div>
+      <div class={`card__value${props.mono ? " card__value--mono" : ""}`}>
+        {props.value}
+      </div>
+    </div>
+  );
+}
+
+function AgentsPanel(props: { agents: Resource<DetectedAgent[]> }) {
+  return (
+    <section class="agents">
+      <header class="agents__header">
+        <h2>Detected agents</h2>
+        <span class="agents__count">{(props.agents() ?? []).length}</span>
+      </header>
+      <Show
+        when={(props.agents() ?? []).length > 0}
+        fallback={
+          <p class="empty">
+            No coding agents currently running. Start Claude Code, OpenCode,
+            Codex, Gemini CLI, or Aider in any terminal.
+          </p>
+        }
+      >
+        <ul class="agents__list">
+          <For each={props.agents()}>
+            {(a) => (
+              <li class="agents__item">
+                <div class="agents__name">{a.display_name}</div>
+                <div class="agents__meta">
+                  <span class="agents__kind">{a.kind}</span>
+                  <Show when={a.cwd}>
+                    {(cwd) => <code class="agents__cwd">{cwd()}</code>}
+                  </Show>
+                </div>
+              </li>
+            )}
+          </For>
+        </ul>
+      </Show>
+    </section>
   );
 }

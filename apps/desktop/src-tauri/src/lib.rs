@@ -1,10 +1,14 @@
 //! OpenCherry desktop entry point.
 //!
-//! Sprint 0 v2: bootstrap Tauri 2 + SolidJS shell. A single `ping` command
-//! wired through `invoke()` validates the IPC bridge end-to-end. Real
-//! commands (list_repos, repo_status, list_agents, ...) land in Sprint 1.
+//! Sprint 1: real Tauri commands for repo registration, status, and
+//! agent detection. Persistence lives in the platform app config dir.
 
+use opencherry_agents::DetectedAgent;
+use opencherry_core::{RepoId, RepoRef, RepoStatus};
+use opencherry_persistence as persist;
 use serde::Serialize;
+use std::path::{Path, PathBuf};
+use tauri::Manager;
 
 #[derive(Debug, Serialize)]
 pub struct PingResponse {
@@ -19,6 +23,48 @@ fn ping(name: Option<String>) -> PingResponse {
         message: format!("OpenCherry says hi, {who}"),
         core_version: env!("CARGO_PKG_VERSION"),
     }
+}
+
+fn config_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    app.path()
+        .app_config_dir()
+        .map_err(|e| format!("failed to resolve app config dir: {e}"))
+}
+
+#[tauri::command]
+fn list_repos(app: tauri::AppHandle) -> Result<Vec<RepoRef>, String> {
+    let dir = config_dir(&app)?;
+    let cfg = persist::load(&dir).map_err(|e| e.to_string())?;
+    Ok(cfg.repos)
+}
+
+#[tauri::command]
+fn register_repo(app: tauri::AppHandle, path: String) -> Result<RepoRef, String> {
+    let dir = config_dir(&app)?;
+    let p = Path::new(&path);
+
+    // Validate it's a git repo before persisting; surface a clean error.
+    if git2::Repository::discover(p).is_err() {
+        return Err(format!("not a git repository: {path}"));
+    }
+
+    persist::add_repo(&dir, p).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn unregister_repo(app: tauri::AppHandle, id: String) -> Result<bool, String> {
+    let dir = config_dir(&app)?;
+    persist::remove_repo(&dir, &RepoId(id)).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn repo_status(path: String) -> Result<RepoStatus, String> {
+    opencherry_repo::repo_status(Path::new(&path)).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn list_agents() -> Vec<DetectedAgent> {
+    opencherry_agents::detect_running_agents()
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -38,7 +84,22 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![ping])
+        .invoke_handler(tauri::generate_handler![
+            ping,
+            list_repos,
+            register_repo,
+            unregister_repo,
+            repo_status,
+            list_agents,
+        ])
+        .setup(|app| {
+            // Eagerly create config dir so first save doesn't race.
+            if let Ok(dir) = app.path().app_config_dir() {
+                let _ = std::fs::create_dir_all(&dir);
+                tracing::info!(path = %dir.display(), "config dir ready");
+            }
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running OpenCherry desktop");
 }
