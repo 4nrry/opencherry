@@ -24,12 +24,23 @@ impl RepoId {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct AgentId(pub String);
 
-/// A repository the user has registered with OpenCherry.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TrackedTargetKind {
+    Repo,
+    Group,
+}
+
+/// A tracked target the user has registered with OpenCherry.
+///
+/// Today this can be either a concrete Git repository or a non-repository
+/// folder that groups many repositories underneath it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RepoRef {
     pub id: RepoId,
     pub path: PathBuf,
     pub display_name: String,
+    pub kind: TrackedTargetKind,
 }
 
 /// Live status snapshot for a registered repository. Cheap to compute
@@ -66,6 +77,29 @@ pub struct RepoDiffFile {
     pub additions: usize,
     pub deletions: usize,
     pub patch: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct RepoChangeCounts {
+    pub staged: usize,
+    pub unstaged: usize,
+    pub untracked: usize,
+    pub conflicted: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoGroupRepo {
+    pub repo: RepoRef,
+    pub status: RepoStatus,
+    pub changes: RepoChangeCounts,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoGroupSnapshot {
+    pub root: RepoRef,
+    pub repos: Vec<RepoGroupRepo>,
+    pub totals: RepoChangeCounts,
+    pub dirty_repos: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

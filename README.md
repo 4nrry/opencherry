@@ -6,7 +6,7 @@ OpenCherry is an open source desktop app that lets you orchestrate many Git
 repositories across many AI coding agents (Claude Code, OpenCode, Codex,
 Gemini CLI, Aider, …) from a single VS Code Source Control–style interface.
 
-**Status:** pre-alpha, Sprint 0 v2 (Tauri 2 bootstrap). Not usable yet.
+**Status:** pre-alpha, usable desktop shell with core multi-repo Git workflow.
 
 ## Why
 
@@ -23,11 +23,56 @@ and Windows as supported secondary platforms via Tauri 2.
 - **Shell:** [Tauri 2](https://tauri.app) (Rust core + WebView UI)
 - **Frontend:** [SolidJS](https://solidjs.com) + Vite + TypeScript
 - **Language:** Rust (stable, 1.80+)
-- **Git:** `git2` (vendored libgit2); `gix` evaluated for batch reads
+- **Git:** `git2` (vendored libgit2) plus selective `git` CLI calls for remote operations
 - **Process detection:** `sysinfo`
 - **Async:** Tokio
 - **Filesystem watch:** `notify`
-- **Persistence:** `rusqlite` (planned, Sprint 2)
+- **Persistence:** `rusqlite` + SQLite
+
+## Current Capabilities
+
+### Repositories
+
+- register and remove tracked repositories
+- persist tracked repositories in SQLite
+- import legacy `repos.json` data automatically
+- show a multi-repo sidebar and per-repo detail view
+
+### Git workflow
+
+- repository status snapshot
+- grouped diff sections:
+  - conflicted
+  - staged
+  - unstaged
+  - untracked
+- stage file
+- unstage file
+- commit staged changes
+- stage all + commit
+- publish current branch
+- sync local and remote changes
+
+### Agents
+
+- detect running CLI agents via `sysinfo`
+- classify supported agents:
+  - Claude Code
+  - OpenCode
+  - Codex
+  - Gemini CLI
+  - Aider
+- ignore Antigravity extension processes
+- filter Linux thread duplicates from process snapshots
+
+### Frontend
+
+- repository sidebar with add/remove actions
+- repo status cards
+- commit message box and commit actions
+- dynamic primary action bar for commit/publish/sync states
+- grouped diff rendering with per-file stage/unstage actions
+- detected agent panel
 
 ## License
 
@@ -43,7 +88,8 @@ apps/
 crates/
   opencherry_core/      # shared types (RepoId, AgentId, events)
   opencherry_repo/      # git2-backed repo operations
-  opencherry_agents/    # sysinfo-based agent detection (Sprint 1)
+  opencherry_agents/    # sysinfo-based agent detection
+  opencherry_persistence/ # SQLite-backed repo persistence
 ```
 
 Additional crates (`opencherry_inject`, `opencherry_commit_msg`,
@@ -77,10 +123,39 @@ pnpm install
 pnpm tauri dev
 ```
 
+### Validate
+
+```bash
+cargo check --workspace
+cargo test --workspace
+pnpm -C apps/desktop test
+pnpm -C apps/desktop build
+pnpm -C apps/desktop test:e2e
+```
+
+## Testing
+
+The current codebase includes backend and frontend automated coverage for the
+already shipped behavior.
+
+- persistence tests cover add/list/remove and legacy JSON import
+- repo tests cover clean/dirty status, ahead/behind, grouped diff states,
+  stage/unstage, commit flows, and publish/sync command behavior
+- agent tests cover classification, Antigravity filtering, and Linux thread
+  filtering behavior
+- frontend tests cover grouped diff rendering, stage/unstage buttons, primary
+  action rendering, and commit UI states
+- desktop E2E scaffolding exists under `apps/desktop/e2e/` using Tauri WebDriver
+  tooling; on Linux it requires `WebKitWebDriver` from the system package set
+
 ## Roadmap
 
-- **Sprint 0 v2 (current):** Tauri shell, IPC ping, repo crate, agent stub.
-- **Sprint 1:** Repo registration, status cards, sysinfo agent detection.
-- **Sprint 2:** Diff viewer, commit message provider, persistence.
-- **Sprint 3:** Agent orchestration (spawn, attach, message bus).
-- **Sprint 4:** Settings, providers, packaging (deb/AppImage/dmg/MSI).
+- **Current focus:** deepen the existing Git UX and improve internal testability.
+- **Next likely steps:**
+  - discard/revert by file
+  - stage/unstage by hunk
+  - structured diff model (hunks/lines instead of file patch blobs)
+  - richer merge/rebase-aware primary actions
+  - replace polling with watchers/events where appropriate
+  - improve publish/sync error surfacing in the UI
+  - expand test coverage as new behavior lands

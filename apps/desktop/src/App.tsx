@@ -14,6 +14,7 @@ import type {
   DetectedAgent,
   RepoActionResult,
   RepoDiff,
+  RepoGroupSnapshot,
   RepoRef,
   RepoStatus,
 } from "./types";
@@ -34,12 +35,20 @@ async function fetchDiff(path: string): Promise<RepoDiff> {
   return await invoke<RepoDiff>("repo_diff", { path });
 }
 
+async function fetchGroupSnapshot(path: string): Promise<RepoGroupSnapshot> {
+  return await invoke<RepoGroupSnapshot>("repo_group_snapshot", { path });
+}
+
 async function stageFile(path: string, relativePath: string): Promise<void> {
   await invoke("stage_repo_file", { path, relativePath });
 }
 
 async function unstageFile(path: string, relativePath: string): Promise<void> {
   await invoke("unstage_repo_file", { path, relativePath });
+}
+
+async function discardFile(path: string, relativePath: string): Promise<void> {
+  await invoke("discard_repo_file", { path, relativePath });
 }
 
 async function publishBranch(path: string): Promise<RepoActionResult> {
@@ -50,11 +59,26 @@ async function syncChanges(path: string): Promise<RepoActionResult> {
   return await invoke<RepoActionResult>("sync_repo_changes", { path });
 }
 
+export const __testables = {
+  fetchRepos,
+  fetchAgents,
+  fetchStatus,
+  fetchDiff,
+  fetchGroupSnapshot,
+  stageFile,
+  unstageFile,
+  discardFile,
+  publishBranch,
+  syncChanges,
+};
+
 export default function App() {
   const [repos, { refetch: refetchRepos }] = createResource(fetchRepos);
   const [agents, { refetch: refetchAgents }] = createResource(fetchAgents);
   const [selected, setSelected] = createSignal<RepoRef | null>(null);
   const [error, setError] = createSignal<string | null>(null);
+  const trackedRepoPaths = () =>
+    new Set((repos() ?? []).filter((repo) => repo.kind === "repo").map((repo) => repo.path));
 
   // Poll agents every 3s.
   let agentsTimer: ReturnType<typeof setInterval> | undefined;
@@ -110,11 +134,16 @@ export default function App() {
               {(r) => (
                 <li
                   class={`repo-list__item${selected()?.id === r.id ? " is-selected" : ""}`}
+                  data-repo-path={r.path}
                   onClick={() => setSelected(r)}
                 >
-                  <span class="repo-list__name">{r.display_name}</span>
+                  <span class="repo-list__name">
+                    {r.kind === "group" ? "[Group] " : ""}
+                    {r.display_name}
+                  </span>
                   <button
                     class="repo-list__remove"
+                    data-remove-repo-path={r.path}
                     title="Remove from OpenCherry"
                     onClick={(e) => {
                       e.stopPropagation();
@@ -143,7 +172,26 @@ export default function App() {
             </div>
           }
         >
-          {(repo) => <RepoView repo={repo()} />}
+          <Show when={selected()?.kind === "group"} fallback={<RepoView repo={selected()!} />}>
+            <RepoGroupView
+              group={selected()!}
+              trackedRepoPaths={trackedRepoPaths()}
+              onRegisterRepo={async (repo) => {
+                setError(null);
+                try {
+                  const registered = await invoke<RepoRef>("register_repo", { path: repo.path });
+                  await refetchRepos();
+                  setSelected(registered);
+                } catch (e) {
+                  setError(String(e));
+                }
+              }}
+              onSelectRepo={(repo) => {
+                const existing = (repos() ?? []).find((tracked) => tracked.path === repo.path);
+                setSelected(existing ?? repo);
+              }}
+            />
+          </Show>
         </Show>
 
         <Show when={error()}>
@@ -153,6 +201,109 @@ export default function App() {
         <AgentsPanel agents={agents} />
       </main>
     </div>
+  );
+}
+
+function RepoGroupView(props: {
+  group: RepoRef;
+  trackedRepoPaths: Set<string>;
+  onRegisterRepo: (repo: RepoRef) => Promise<void>;
+  onSelectRepo: (repo: RepoRef) => void;
+}) {
+  const [snapshot, { refetch }] = createResource(
+    () => props.group.path,
+    (p) => fetchGroupSnapshot(p),
+  );
+  const visibleRepos = () =>
+    (snapshot()?.repos ?? []).filter((entry) => !props.trackedRepoPaths.has(entry.repo.path));
+
+  let timer: ReturnType<typeof setInterval> | undefined;
+  onMount(() => {
+    timer = setInterval(() => {
+      void refetch();
+    }, 5000);
+  });
+  onCleanup(() => {
+    if (timer) clearInterval(timer);
+  });
+
+  return (
+    <section class="repo-view">
+      <header class="repo-view__header">
+        <h1>{props.group.display_name}</h1>
+        <code class="repo-view__path">{props.group.path}</code>
+      </header>
+
+      <Show
+        when={snapshot()}
+        fallback={
+          <Show when={snapshot.error} fallback={<p>Loading group…</p>}>
+            <pre class="banner banner--error">{String(snapshot.error)}</pre>
+          </Show>
+        }
+      >
+        {(group) => (
+          <>
+            <div class="status-grid">
+              <StatusCard label="Repos" value={String(group().repos.length)} />
+              <StatusCard
+                label="Dirty repos"
+                value={String(group().dirty_repos)}
+                tone={group().dirty_repos > 0 ? "warn" : "ok"}
+              />
+              <StatusCard label="Staged files" value={String(group().totals.staged)} />
+              <StatusCard label="Unstaged files" value={String(group().totals.unstaged)} />
+              <StatusCard label="Untracked files" value={String(group().totals.untracked)} />
+            </div>
+
+            <section class="diff-panel">
+              <header class="diff-panel__header">
+                <h2>Child repositories</h2>
+                <span class="agents__count">{visibleRepos().length}</span>
+              </header>
+              <Show
+                when={visibleRepos().length > 0}
+                fallback={<p class="empty">No untracked child repositories to show for this folder.</p>}
+              >
+                <div class="diff-group">
+                  <For each={visibleRepos()}>
+                    {(entry) => (
+                      <article
+                        class="diff-file"
+                        data-repo-path={entry.repo.path}
+                        onClick={() => props.onSelectRepo(entry.repo)}
+                      >
+                        <header class="diff-file__header">
+                          <div class="diff-file__title">
+                            <code>{entry.repo.display_name}</code>
+                            <span class="diff-file__status">{entry.status.branch ?? "(detached)"}</span>
+                          </div>
+                          <div class="diff-file__actions">
+                            <span>
+                              S:{entry.changes.staged} U:{entry.changes.unstaged} N:{entry.changes.untracked} C:{entry.changes.conflicted}
+                            </span>
+                            <button
+                              class="btn btn--tiny"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void props.onRegisterRepo(entry.repo);
+                              }}
+                            >
+                              Track
+                            </button>
+                          </div>
+                        </header>
+                        <code class="repo-view__path">{entry.repo.path}</code>
+                      </article>
+                    )}
+                  </For>
+                </div>
+              </Show>
+            </section>
+          </>
+        )}
+      </Show>
+    </section>
   );
 }
 
@@ -340,7 +491,7 @@ function RepoView(props: { repo: RepoRef }) {
   );
 }
 
-function RepoPrimaryActionBar(props: {
+export function RepoPrimaryActionBar(props: {
   status: RepoStatus;
   diff: RepoDiff | undefined;
   onRun: (kind: "commit" | "publish" | "sync") => Promise<void>;
@@ -385,7 +536,7 @@ function RepoPrimaryActionBar(props: {
   );
 }
 
-function DiffPanel(props: {
+export function DiffPanel(props: {
   repoPath: string;
   diff: Resource<RepoDiff>;
   onChange: () => Promise<void>;
@@ -424,12 +575,16 @@ function DiffPanel(props: {
             files={props.diff()?.unstaged ?? []}
             actionLabel="Stage"
             onAction={(relativePath) => stageFile(props.repoPath, relativePath).then(props.onChange)}
+            secondaryActionLabel="Discard"
+            onSecondaryAction={(relativePath) => discardFile(props.repoPath, relativePath).then(props.onChange)}
           />
           <DiffGroup
             title="Untracked"
             files={props.diff()?.untracked ?? []}
             actionLabel="Stage"
             onAction={(relativePath) => stageFile(props.repoPath, relativePath).then(props.onChange)}
+            secondaryActionLabel="Discard"
+            onSecondaryAction={(relativePath) => discardFile(props.repoPath, relativePath).then(props.onChange)}
           />
         </>
       </Show>
@@ -437,16 +592,18 @@ function DiffPanel(props: {
   );
 }
 
-function DiffGroup(props: {
+export function DiffGroup(props: {
   title: string;
   files: RepoDiff["staged"];
   tone?: "warn";
   actionLabel?: string;
   onAction?: (relativePath: string) => Promise<void>;
+  secondaryActionLabel?: string;
+  onSecondaryAction?: (relativePath: string) => Promise<void>;
 }) {
   return (
     <Show when={props.files.length > 0}>
-      <section class="diff-group">
+      <section class="diff-group" data-diff-group={props.title.toLowerCase()}>
         <header class="diff-group__header">
           <h3>{props.title}</h3>
           <span class={`diff-group__count${props.tone ? ` diff-group__count--${props.tone}` : ""}`}>
@@ -456,7 +613,7 @@ function DiffGroup(props: {
 
         <For each={props.files}>
           {(file) => (
-            <article class="diff-file">
+            <article class="diff-file" data-file-path={file.path}>
               <header class="diff-file__header">
                 <div class="diff-file__title">
                   <code>{file.path}</code>
@@ -472,6 +629,14 @@ function DiffGroup(props: {
                       onClick={() => void props.onAction?.(file.path)}
                     >
                       {props.actionLabel}
+                    </button>
+                  </Show>
+                  <Show when={props.secondaryActionLabel && props.onSecondaryAction}>
+                    <button
+                      class="btn btn--tiny"
+                      onClick={() => void props.onSecondaryAction?.(file.path)}
+                    >
+                      {props.secondaryActionLabel}
                     </button>
                   </Show>
                 </div>

@@ -5,7 +5,10 @@ export interface RepoRef {
   id: string;
   path: string;
   display_name: string;
+  kind: TrackedTargetKind;
 }
+
+export type TrackedTargetKind = "repo" | "group";
 
 export interface RepoStatus {
   id: string;
@@ -39,6 +42,26 @@ export interface CommitResult {
 
 export interface RepoActionResult {
   summary: string;
+}
+
+export interface RepoChangeCounts {
+  staged: number;
+  unstaged: number;
+  untracked: number;
+  conflicted: number;
+}
+
+export interface RepoGroupRepo {
+  repo: RepoRef;
+  status: RepoStatus;
+  changes: RepoChangeCounts;
+}
+
+export interface RepoGroupSnapshot {
+  root: RepoRef;
+  repos: RepoGroupRepo[];
+  totals: RepoChangeCounts;
+  dirty_repos: number;
 }
 
 export type AgentKind =

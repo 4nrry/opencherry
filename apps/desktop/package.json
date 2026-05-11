@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "test": "vitest run",
+    "test:e2e": "pnpm --dir e2e test",
     "preview": "vite preview",
     "tauri": "tauri"
   },
@@ -16,9 +18,14 @@
     "solid-js": "^1.9.3"
   },
   "devDependencies": {
+    "@solidjs/testing-library": "^0.8.10",
+    "@testing-library/jest-dom": "^6.6.3",
+    "@types/node": "^22.10.2",
+    "jsdom": "^26.1.0",
     "@tauri-apps/cli": "^2",
     "typescript": "~5.6.3",
     "vite": "^6.0.3",
-    "vite-plugin-solid": "^2.11.0"
+    "vite-plugin-solid": "^2.11.0",
+    "vitest": "^2.1.9"
   }
 }

@@ -20,6 +20,16 @@ pub struct DetectedAgent {
     pub command_line: String,
 }
 
+#[derive(Debug, Clone)]
+struct ProcessSnapshot {
+    pid: u32,
+    exe_path: String,
+    exe_basename: String,
+    argv: Vec<String>,
+    cwd: Option<String>,
+    is_thread: bool,
+}
+
 /// Classify a process by exe basename and argv. Returns `None` if it
 /// doesn't look like a known agent.
 fn classify(exe_path: &str, exe_basename: &str, argv: &[&str]) -> Option<AgentKind> {
@@ -72,45 +82,54 @@ pub fn detect_running_agents() -> Vec<DetectedAgent> {
     );
     sys.refresh_processes(ProcessesToUpdate::All, true);
 
+    let snapshots = sys
+        .processes()
+        .iter()
+        .map(|(pid, proc_)| ProcessSnapshot {
+            pid: pid.as_u32(),
+            exe_path: proc_
+                .exe()
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            exe_basename: proc_
+                .exe()
+                .and_then(|p| p.file_name())
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_else(|| proc_.name().to_string_lossy().into_owned()),
+            argv: proc_
+                .cmd()
+                .iter()
+                .map(|s| s.to_string_lossy().into_owned())
+                .collect(),
+            cwd: proc_.cwd().map(|p| p.to_string_lossy().into_owned()),
+            is_thread: proc_.thread_kind().is_some(),
+        })
+        .collect::<Vec<_>>();
+
+    collect_detected_agents(&snapshots)
+}
+
+fn collect_detected_agents(processes: &[ProcessSnapshot]) -> Vec<DetectedAgent> {
     let mut out = Vec::new();
-    for (pid, proc_) in sys.processes() {
-        // Skip threads — on Linux sysinfo includes /proc/<pid>/task/* by
-        // default, which would otherwise multiply each agent process by
-        // its thread count. `thread_kind() == None` means "real process".
-        if proc_.thread_kind().is_some() {
+    for process in processes {
+        if process.is_thread {
             continue;
         }
 
-        let exe_path = proc_
-            .exe()
-            .map(|p| p.to_string_lossy().into_owned())
-            .unwrap_or_default();
+        // Skip threads — on Linux sysinfo includes /proc/<pid>/task/* by
+        // default, which would otherwise multiply each agent process by
+        // its thread count. `thread_kind() == None` means "real process".
+        let argv_refs: Vec<&str> = process.argv.iter().map(|s| s.as_str()).collect();
 
-        let exe_basename = proc_
-            .exe()
-            .and_then(|p| p.file_name())
-            .map(|s| s.to_string_lossy().into_owned())
-            .unwrap_or_else(|| proc_.name().to_string_lossy().into_owned());
-
-        let argv: Vec<String> = proc_
-            .cmd()
-            .iter()
-            .map(|s| s.to_string_lossy().into_owned())
-            .collect();
-        let argv_refs: Vec<&str> = argv.iter().map(|s| s.as_str()).collect();
-
-        let Some(kind) = classify(&exe_path, &exe_basename, &argv_refs) else {
+        let Some(kind) = classify(&process.exe_path, &process.exe_basename, &argv_refs) else {
             continue;
         };
 
-        let pid_u32 = pid.as_u32();
+        let pid_u32 = process.pid;
         let display_name = format!("{} (pid {})", kind.display_name(), pid_u32);
         let id = AgentId(format!("pid-{pid_u32}"));
-        let cwd = proc_
-            .cwd()
-            .map(|p| p.to_string_lossy().into_owned());
         let command_line = {
-            let s = argv.join(" ");
+            let s = process.argv.join(" ");
             if s.len() > 200 {
                 format!("{}…", &s[..200])
             } else {
@@ -123,11 +142,97 @@ pub fn detect_running_agents() -> Vec<DetectedAgent> {
             kind,
             display_name,
             pid: pid_u32,
-            cwd,
+            cwd: process.cwd.clone(),
             command_line,
         });
     }
 
     out.sort_by(|a, b| a.pid.cmp(&b.pid));
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn snapshot(
+        pid: u32,
+        exe_path: &str,
+        exe_basename: &str,
+        argv: &[&str],
+        is_thread: bool,
+    ) -> ProcessSnapshot {
+        ProcessSnapshot {
+            pid,
+            exe_path: exe_path.to_string(),
+            exe_basename: exe_basename.to_string(),
+            argv: argv.iter().map(|arg| arg.to_string()).collect(),
+            cwd: Some("/workspace".to_string()),
+            is_thread,
+        }
+    }
+
+    #[test]
+    fn classify_matches_supported_agent_wrappers() {
+        assert_eq!(
+            classify(
+                "/usr/bin/node",
+                "node",
+                &["node", "/tmp/@anthropic-ai/claude-code/index.js"]
+            ),
+            Some(AgentKind::ClaudeCode)
+        );
+        assert_eq!(
+            classify("/usr/bin/opencode", "opencode", &["opencode"]),
+            Some(AgentKind::OpenCode)
+        );
+        assert_eq!(
+            classify("/usr/bin/python3", "python3", &["python3", "-m", "aider"]),
+            Some(AgentKind::Aider)
+        );
+    }
+
+    #[test]
+    fn classify_ignores_antigravity_extensions() {
+        assert_eq!(
+            classify(
+                "/home/user/.antigravity/extensions/opencode/bin/opencode",
+                "opencode",
+                &["opencode"]
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn collect_detected_agents_filters_threads_and_sorts_by_pid() {
+        let agents = collect_detected_agents(&[
+            snapshot(400, "/usr/bin/opencode", "opencode", &["opencode"], false),
+            snapshot(200, "/usr/bin/node", "node", &["node", "codex-cli"], false),
+            snapshot(201, "/usr/bin/node", "node", &["node", "codex-cli"], true),
+        ]);
+
+        assert_eq!(agents.len(), 2);
+        assert_eq!(agents[0].pid, 200);
+        assert_eq!(agents[0].kind, AgentKind::Codex);
+        assert_eq!(agents[1].pid, 400);
+        assert_eq!(agents[1].kind, AgentKind::OpenCode);
+    }
+
+    #[test]
+    fn collect_detected_agents_truncates_command_line() {
+        let long_arg = "x".repeat(250);
+        let agents = collect_detected_agents(&[ProcessSnapshot {
+            pid: 123,
+            exe_path: "/usr/bin/opencode".to_string(),
+            exe_basename: "opencode".to_string(),
+            argv: vec!["opencode".to_string(), long_arg],
+            cwd: None,
+            is_thread: false,
+        }]);
+
+        assert_eq!(agents.len(), 1);
+        assert!(agents[0].command_line.ends_with('…'));
+        assert_eq!(agents[0].command_line.chars().count(), 201);
+    }
 }
