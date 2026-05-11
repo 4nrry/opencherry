@@ -258,21 +258,61 @@ function RepoView(props: { repo: RepoRef }) {
 }
 
 function DiffPanel(props: { diff: Resource<RepoDiff> }) {
+  const totalFiles = () => {
+    const diff = props.diff();
+    if (!diff) return 0;
+    return (
+      diff.staged.length +
+      diff.unstaged.length +
+      diff.untracked.length +
+      diff.conflicted.length
+    );
+  };
+
   return (
     <section class="diff-panel">
       <header class="diff-panel__header">
         <h2>Changes</h2>
-        <span class="agents__count">{(props.diff()?.files ?? []).length}</span>
+        <span class="agents__count">{totalFiles()}</span>
       </header>
       <Show
-        when={(props.diff()?.files ?? []).length > 0}
+        when={totalFiles() > 0}
         fallback={<p class="empty">No working tree changes.</p>}
       >
-        <For each={props.diff()?.files}>
+        <>
+          <DiffGroup title="Conflicted" files={props.diff()?.conflicted ?? []} tone="warn" />
+          <DiffGroup title="Staged" files={props.diff()?.staged ?? []} />
+          <DiffGroup title="Unstaged" files={props.diff()?.unstaged ?? []} />
+          <DiffGroup title="Untracked" files={props.diff()?.untracked ?? []} />
+        </>
+      </Show>
+    </section>
+  );
+}
+
+function DiffGroup(props: {
+  title: string;
+  files: RepoDiff["staged"];
+  tone?: "warn";
+}) {
+  return (
+    <Show when={props.files.length > 0}>
+      <section class="diff-group">
+        <header class="diff-group__header">
+          <h3>{props.title}</h3>
+          <span class={`diff-group__count${props.tone ? ` diff-group__count--${props.tone}` : ""}`}>
+            {props.files.length}
+          </span>
+        </header>
+
+        <For each={props.files}>
           {(file) => (
             <article class="diff-file">
               <header class="diff-file__header">
-                <code>{file.path}</code>
+                <div class="diff-file__title">
+                  <code>{file.path}</code>
+                  <span class="diff-file__status">{file.status}</span>
+                </div>
                 <span>
                   +{file.additions} / -{file.deletions}
                 </span>
@@ -283,8 +323,8 @@ function DiffPanel(props: { diff: Resource<RepoDiff> }) {
             </article>
           )}
         </For>
-      </Show>
-    </section>
+      </section>
+    </Show>
   );
 }
 

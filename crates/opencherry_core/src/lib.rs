@@ -53,7 +53,10 @@ pub struct RepoStatus {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RepoDiff {
-    pub files: Vec<RepoDiffFile>,
+    pub staged: Vec<RepoDiffFile>,
+    pub unstaged: Vec<RepoDiffFile>,
+    pub untracked: Vec<RepoDiffFile>,
+    pub conflicted: Vec<RepoDiffFile>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

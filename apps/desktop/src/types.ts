@@ -18,7 +18,10 @@ export interface RepoStatus {
 }
 
 export interface RepoDiff {
-  files: RepoDiffFile[];
+  staged: RepoDiffFile[];
+  unstaged: RepoDiffFile[];
+  untracked: RepoDiffFile[];
+  conflicted: RepoDiffFile[];
 }
 
 export interface RepoDiffFile {
