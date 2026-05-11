@@ -33,6 +33,14 @@ async function fetchDiff(path: string): Promise<RepoDiff> {
   return await invoke<RepoDiff>("repo_diff", { path });
 }
 
+async function stageFile(path: string, relativePath: string): Promise<void> {
+  await invoke("stage_repo_file", { path, relativePath });
+}
+
+async function unstageFile(path: string, relativePath: string): Promise<void> {
+  await invoke("unstage_repo_file", { path, relativePath });
+}
+
 export default function App() {
   const [repos, { refetch: refetchRepos }] = createResource(fetchRepos);
   const [agents, { refetch: refetchAgents }] = createResource(fetchAgents);
@@ -181,6 +189,23 @@ function RepoView(props: { repo: RepoRef }) {
     }
   }
 
+  async function commitAll() {
+    setCommitError(null);
+    setCommitResult(null);
+    try {
+      const result = await invoke<CommitResult>("commit_all_repo", {
+        path: props.repo.path,
+        message: message(),
+      });
+      setCommitResult(result);
+      setMessage("");
+      await refetch();
+      await refetchDiff();
+    } catch (e) {
+      setCommitError(String(e));
+    }
+  }
+
   return (
     <section class="repo-view">
       <header class="repo-view__header">
@@ -231,10 +256,17 @@ function RepoView(props: { repo: RepoRef }) {
               <div class="commit-box__actions">
                 <button
                   class="btn"
-                  disabled={!s().dirty || message().trim().length === 0}
+                  disabled={(diff()?.staged.length ?? 0) === 0 || message().trim().length === 0}
                   onClick={() => void commit()}
                 >
-                  Commit all changes
+                  Commit staged
+                </button>
+                <button
+                  class="btn"
+                  disabled={!s().dirty || message().trim().length === 0}
+                  onClick={() => void commitAll()}
+                >
+                  Stage all + commit
                 </button>
                 <Show when={commitResult()}>
                   {(r) => (
@@ -252,12 +284,23 @@ function RepoView(props: { repo: RepoRef }) {
         )}
       </Show>
 
-      <DiffPanel diff={diff} />
+      <DiffPanel
+        repoPath={props.repo.path}
+        diff={diff}
+        onChange={async () => {
+          await refetch();
+          await refetchDiff();
+        }}
+      />
     </section>
   );
 }
 
-function DiffPanel(props: { diff: Resource<RepoDiff> }) {
+function DiffPanel(props: {
+  repoPath: string;
+  diff: Resource<RepoDiff>;
+  onChange: () => Promise<void>;
+}) {
   const totalFiles = () => {
     const diff = props.diff();
     if (!diff) return 0;
@@ -281,9 +324,24 @@ function DiffPanel(props: { diff: Resource<RepoDiff> }) {
       >
         <>
           <DiffGroup title="Conflicted" files={props.diff()?.conflicted ?? []} tone="warn" />
-          <DiffGroup title="Staged" files={props.diff()?.staged ?? []} />
-          <DiffGroup title="Unstaged" files={props.diff()?.unstaged ?? []} />
-          <DiffGroup title="Untracked" files={props.diff()?.untracked ?? []} />
+          <DiffGroup
+            title="Staged"
+            files={props.diff()?.staged ?? []}
+            actionLabel="Unstage"
+            onAction={(relativePath) => unstageFile(props.repoPath, relativePath).then(props.onChange)}
+          />
+          <DiffGroup
+            title="Unstaged"
+            files={props.diff()?.unstaged ?? []}
+            actionLabel="Stage"
+            onAction={(relativePath) => stageFile(props.repoPath, relativePath).then(props.onChange)}
+          />
+          <DiffGroup
+            title="Untracked"
+            files={props.diff()?.untracked ?? []}
+            actionLabel="Stage"
+            onAction={(relativePath) => stageFile(props.repoPath, relativePath).then(props.onChange)}
+          />
         </>
       </Show>
     </section>
@@ -294,6 +352,8 @@ function DiffGroup(props: {
   title: string;
   files: RepoDiff["staged"];
   tone?: "warn";
+  actionLabel?: string;
+  onAction?: (relativePath: string) => Promise<void>;
 }) {
   return (
     <Show when={props.files.length > 0}>
@@ -313,9 +373,19 @@ function DiffGroup(props: {
                   <code>{file.path}</code>
                   <span class="diff-file__status">{file.status}</span>
                 </div>
-                <span>
-                  +{file.additions} / -{file.deletions}
-                </span>
+                <div class="diff-file__actions">
+                  <span>
+                    +{file.additions} / -{file.deletions}
+                  </span>
+                  <Show when={props.actionLabel && props.onAction}>
+                    <button
+                      class="btn btn--tiny"
+                      onClick={() => void props.onAction?.(file.path)}
+                    >
+                      {props.actionLabel}
+                    </button>
+                  </Show>
+                </div>
               </header>
               <Show when={file.patch}>
                 <pre class="diff-file__patch">{file.patch}</pre>

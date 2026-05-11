@@ -149,7 +149,32 @@ pub fn repo_diff(path: &Path) -> anyhow::Result<RepoDiff> {
     })
 }
 
+pub fn stage_file(path: &Path, relative_path: &str) -> anyhow::Result<()> {
+    let repo = git2::Repository::discover(path)
+        .map_err(|_| CoreError::NotARepo(path.to_path_buf()))?;
+    let mut index = repo.index()?;
+    index.add_all([relative_path], git2::IndexAddOption::DEFAULT, None)?;
+    index.write()?;
+    Ok(())
+}
+
+pub fn unstage_file(path: &Path, relative_path: &str) -> anyhow::Result<()> {
+    let repo = git2::Repository::discover(path)
+        .map_err(|_| CoreError::NotARepo(path.to_path_buf()))?;
+    let head = repo.head()?.peel_to_commit()?;
+    repo.reset_default(Some(head.as_object()), [relative_path])?;
+    Ok(())
+}
+
+pub fn commit_staged(path: &Path, message: &str) -> anyhow::Result<CommitResult> {
+    commit(path, message, false)
+}
+
 pub fn commit_all(path: &Path, message: &str) -> anyhow::Result<CommitResult> {
+    commit(path, message, true)
+}
+
+fn commit(path: &Path, message: &str, stage_all: bool) -> anyhow::Result<CommitResult> {
     let message = message.trim();
     if message.is_empty() {
         return Err(anyhow::anyhow!("commit message cannot be empty"));
@@ -158,8 +183,15 @@ pub fn commit_all(path: &Path, message: &str) -> anyhow::Result<CommitResult> {
     let repo = git2::Repository::discover(path)
         .map_err(|_| CoreError::NotARepo(path.to_path_buf()))?;
     let mut index = repo.index()?;
-    index.add_all(["*"], git2::IndexAddOption::DEFAULT, None)?;
+    if stage_all {
+        index.add_all(["*"], git2::IndexAddOption::DEFAULT, None)?;
+    }
     index.write()?;
+
+    if !has_staged_changes(&repo)? {
+        return Err(anyhow::anyhow!("no staged changes to commit"));
+    }
+
     let tree_oid = index.write_tree()?;
     let tree = repo.find_tree(tree_oid)?;
 
@@ -317,6 +349,11 @@ fn head_tree(repo: &git2::Repository) -> anyhow::Result<Option<git2::Tree<'_>>> 
         return Ok(None);
     };
     Ok(Some(repo.find_commit(oid)?.tree()?))
+}
+
+fn has_staged_changes(repo: &git2::Repository) -> anyhow::Result<bool> {
+    let diff = repo.diff_tree_to_index(head_tree(repo)?.as_ref(), None, Some(default_diff_options()))?;
+    Ok(diff.deltas().len() > 0)
 }
 
 fn default_diff_options() -> &'static mut git2::DiffOptions {

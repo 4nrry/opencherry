@@ -68,7 +68,22 @@ fn repo_diff(path: String) -> Result<RepoDiff, String> {
 
 #[tauri::command]
 fn commit_repo(path: String, message: String) -> Result<CommitResult, String> {
+    opencherry_repo::commit_staged(Path::new(&path), &message).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn commit_all_repo(path: String, message: String) -> Result<CommitResult, String> {
     opencherry_repo::commit_all(Path::new(&path), &message).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn stage_repo_file(path: String, relative_path: String) -> Result<(), String> {
+    opencherry_repo::stage_file(Path::new(&path), &relative_path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn unstage_repo_file(path: String, relative_path: String) -> Result<(), String> {
+    opencherry_repo::unstage_file(Path::new(&path), &relative_path).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -101,6 +116,9 @@ pub fn run() {
             repo_status,
             repo_diff,
             commit_repo,
+            commit_all_repo,
+            stage_repo_file,
+            unstage_repo_file,
             list_agents,
         ])
         .setup(|app| {
