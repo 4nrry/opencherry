@@ -23,10 +23,21 @@ import type {
 type GroupRepoFilter = "all" | "untracked" | "tracked" | "dirty";
 type GroupAgentFilter = "all" | "with-agents" | "without-agents";
 
+function pathContains(path: string, base: string) {
+  const normalize = (value: string) => value.replace(/\\/g, "/").replace(/\/+$/g, "");
+  const normalizedPath = normalize(path);
+  const normalizedBase = normalize(base);
+  if (normalizedBase.length === 0) {
+    return normalizedPath.length === 0;
+  }
+
+  return normalizedPath === normalizedBase || normalizedPath.startsWith(`${normalizedBase}/`);
+}
+
 function agentMatchesRepoPath(agent: DetectedAgent, repoPath: string) {
   return (
     agent.targets.repos.some((repo) => repo.path === repoPath) ||
-    (agent.cwd !== null && (agent.cwd === repoPath || agent.cwd.startsWith(`${repoPath}/`)))
+    (agent.cwd !== null && pathContains(agent.cwd, repoPath))
   );
 }
 

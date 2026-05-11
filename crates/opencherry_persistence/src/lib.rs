@@ -13,7 +13,15 @@ const LEGACY_CONFIG_FILE_NAME: &str = "repos.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct LegacyConfigFile {
-    repos: Vec<RepoRef>,
+    repos: Vec<LegacyRepoRef>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct LegacyRepoRef {
+    id: RepoId,
+    path: PathBuf,
+    display_name: String,
+    kind: Option<TrackedTargetKind>,
 }
 
 pub fn db_path(config_dir: &Path) -> PathBuf {
@@ -96,7 +104,7 @@ fn import_legacy_json(config_dir: &Path, conn: &Connection) -> anyhow::Result<()
                 repo.id.0,
                 repo.path.to_string_lossy(),
                 repo.display_name,
-                kind_to_str(&repo.kind),
+                kind_to_str(&repo.kind.unwrap_or(TrackedTargetKind::Repo)),
             ],
         )?;
     }
@@ -286,7 +294,20 @@ mod tests {
         fs::write(
             legacy_config_file_path(config_dir.path()),
             serde_json::to_vec(&LegacyConfigFile {
-                repos: vec![legacy_repo.clone(), legacy_repo.clone()],
+                repos: vec![
+                    LegacyRepoRef {
+                        id: legacy_repo.id.clone(),
+                        path: legacy_repo.path.clone(),
+                        display_name: legacy_repo.display_name.clone(),
+                        kind: Some(legacy_repo.kind.clone()),
+                    },
+                    LegacyRepoRef {
+                        id: legacy_repo.id.clone(),
+                        path: legacy_repo.path.clone(),
+                        display_name: legacy_repo.display_name.clone(),
+                        kind: Some(legacy_repo.kind.clone()),
+                    },
+                ],
             })
             .unwrap(),
         )
@@ -320,7 +341,12 @@ mod tests {
         fs::write(
             legacy_config_file_path(config_dir.path()),
             serde_json::to_vec(&LegacyConfigFile {
-                repos: vec![legacy_group],
+                repos: vec![LegacyRepoRef {
+                    id: legacy_group.id,
+                    path: legacy_group.path,
+                    display_name: legacy_group.display_name,
+                    kind: Some(legacy_group.kind),
+                }],
             })
             .unwrap(),
         )
@@ -349,7 +375,12 @@ mod tests {
         fs::write(
             legacy_config_file_path(config_dir.path()),
             serde_json::to_vec(&LegacyConfigFile {
-                repos: vec![legacy_repo.clone()],
+                repos: vec![LegacyRepoRef {
+                    id: legacy_repo.id.clone(),
+                    path: legacy_repo.path.clone(),
+                    display_name: legacy_repo.display_name.clone(),
+                    kind: Some(legacy_repo.kind.clone()),
+                }],
             })
             .unwrap(),
         )
@@ -362,6 +393,35 @@ mod tests {
         assert!(remove_repo(config_dir.path(), &legacy_repo.id).unwrap());
         let repos = list_repos(config_dir.path()).unwrap();
         assert!(repos.is_empty());
+    }
+
+    #[test]
+    fn imports_legacy_json_without_kind_as_repo() {
+        let config_dir = TestDir::new("persistence-legacy-missing-kind-config");
+        let repos_root = TestDir::new("persistence-legacy-missing-kind-repos");
+        let repo_dir = repos_root.path().join("legacy-no-kind");
+        fs::create_dir_all(&repo_dir).unwrap();
+        let canonical = repo_dir.canonicalize().unwrap();
+
+        fs::write(
+            legacy_config_file_path(config_dir.path()),
+            serde_json::json!({
+                "repos": [
+                    {
+                        "id": RepoId::from_path(&canonical).0,
+                        "path": canonical,
+                        "display_name": "legacy-no-kind"
+                    }
+                ]
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let repos = list_repos(config_dir.path()).unwrap();
+        assert_eq!(repos.len(), 1);
+        assert_eq!(repos[0].display_name, "legacy-no-kind");
+        assert_eq!(repos[0].kind, TrackedTargetKind::Repo);
     }
 
     #[test]
