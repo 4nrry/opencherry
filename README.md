@@ -1,4 +1,4 @@
-# OpenCherry
+# OpenCherry 🍒
 
 > Ubuntu/GNOME-first multi-repo × multi-agent control tower for AI-assisted coding.
 
