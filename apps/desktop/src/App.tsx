@@ -12,6 +12,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import type {
   CommitResult,
   DetectedAgent,
+  RepoActionResult,
   RepoDiff,
   RepoRef,
   RepoStatus,
@@ -39,6 +40,14 @@ async function stageFile(path: string, relativePath: string): Promise<void> {
 
 async function unstageFile(path: string, relativePath: string): Promise<void> {
   await invoke("unstage_repo_file", { path, relativePath });
+}
+
+async function publishBranch(path: string): Promise<RepoActionResult> {
+  return await invoke<RepoActionResult>("publish_repo_branch", { path });
+}
+
+async function syncChanges(path: string): Promise<RepoActionResult> {
+  return await invoke<RepoActionResult>("sync_repo_changes", { path });
 }
 
 export default function App() {
@@ -159,6 +168,7 @@ function RepoView(props: { repo: RepoRef }) {
   const [message, setMessage] = createSignal("");
   const [commitError, setCommitError] = createSignal<string | null>(null);
   const [commitResult, setCommitResult] = createSignal<CommitResult | null>(null);
+  const [actionResult, setActionResult] = createSignal<string | null>(null);
 
   // Refresh status every 5s while this repo is selected.
   let timer: ReturnType<typeof setInterval> | undefined;
@@ -175,6 +185,7 @@ function RepoView(props: { repo: RepoRef }) {
   async function commit() {
     setCommitError(null);
     setCommitResult(null);
+    setActionResult(null);
     try {
       const result = await invoke<CommitResult>("commit_repo", {
         path: props.repo.path,
@@ -192,6 +203,7 @@ function RepoView(props: { repo: RepoRef }) {
   async function commitAll() {
     setCommitError(null);
     setCommitResult(null);
+    setActionResult(null);
     try {
       const result = await invoke<CommitResult>("commit_all_repo", {
         path: props.repo.path,
@@ -199,6 +211,29 @@ function RepoView(props: { repo: RepoRef }) {
       });
       setCommitResult(result);
       setMessage("");
+      await refetch();
+      await refetchDiff();
+    } catch (e) {
+      setCommitError(String(e));
+    }
+  }
+
+  async function runPrimaryAction(kind: "commit" | "publish" | "sync") {
+    setCommitError(null);
+    setCommitResult(null);
+    setActionResult(null);
+
+    try {
+      if (kind === "commit") {
+        await commit();
+        return;
+      }
+
+      const result =
+        kind === "publish"
+          ? await publishBranch(props.repo.path)
+          : await syncChanges(props.repo.path);
+      setActionResult(result.summary);
       await refetch();
       await refetchDiff();
     } catch (e) {
@@ -223,6 +258,12 @@ function RepoView(props: { repo: RepoRef }) {
       >
         {(s) => (
           <>
+            <RepoPrimaryActionBar
+              status={s()}
+              diff={diff()}
+              onRun={runPrimaryAction}
+            />
+
             <div class="status-grid">
               <StatusCard label="Branch" value={s().branch ?? "(detached)"} />
               <StatusCard label="HEAD" value={s().head_short ?? "—"} mono />
@@ -275,6 +316,9 @@ function RepoView(props: { repo: RepoRef }) {
                     </span>
                   )}
                 </Show>
+                <Show when={actionResult()}>
+                  {(r) => <span class="commit-box__result">{r()}</span>}
+                </Show>
               </div>
               <Show when={commitError()}>
                 {(e) => <div class="banner banner--error">{e()}</div>}
@@ -293,6 +337,51 @@ function RepoView(props: { repo: RepoRef }) {
         }}
       />
     </section>
+  );
+}
+
+function RepoPrimaryActionBar(props: {
+  status: RepoStatus;
+  diff: RepoDiff | undefined;
+  onRun: (kind: "commit" | "publish" | "sync") => Promise<void>;
+}) {
+  const stagedCount = () => props.diff?.staged.length ?? 0;
+  const hasDirty = () =>
+    (props.diff?.staged.length ?? 0) +
+      (props.diff?.unstaged.length ?? 0) +
+      (props.diff?.untracked.length ?? 0) +
+      (props.diff?.conflicted.length ?? 0) >
+    0;
+  const canPublish = () => !!props.status.branch && !props.status.upstream;
+  const canSync = () =>
+    !!props.status.upstream &&
+    ((props.status.ahead ?? 0) > 0 || (props.status.behind ?? 0) > 0);
+
+  const action = () => {
+    if (stagedCount() > 0) return { kind: "commit" as const, label: `Commit staged (${stagedCount()})` };
+    if (canPublish()) return { kind: "publish" as const, label: "Publish branch" };
+    if (canSync()) {
+      const ahead = props.status.ahead ?? 0;
+      const behind = props.status.behind ?? 0;
+      return { kind: "sync" as const, label: `Sync changes${behind ? ` ↓${behind}` : ""}${ahead ? ` ↑${ahead}` : ""}` };
+    }
+    return null;
+  };
+
+  return (
+    <Show when={action()}>
+      {(current) => (
+        <section class="primary-action-bar">
+          <button
+            class="btn btn--primary"
+            disabled={current().kind === "commit" ? stagedCount() === 0 : !hasDirty() && current().kind !== "sync"}
+            onClick={() => void props.onRun(current().kind)}
+          >
+            {current().label}
+          </button>
+        </section>
+      )}
+    </Show>
   );
 }
 

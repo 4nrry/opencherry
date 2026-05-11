@@ -37,6 +37,10 @@ export interface CommitResult {
   summary: string;
 }
 
+export interface RepoActionResult {
+  summary: string;
+}
+
 export type AgentKind =
   | "claude-code"
   | "open-code"

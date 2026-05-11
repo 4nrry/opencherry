@@ -321,6 +321,16 @@ body,
   background: rgba(127, 127, 127, 0.12);
 }
 
+.btn--primary {
+  background: var(--selected-bg);
+  border-color: transparent;
+  color: var(--selected-fg);
+}
+
+.btn--primary:hover {
+  filter: brightness(1.04);
+}
+
 .btn:disabled {
   cursor: not-allowed;
   opacity: 0.45;
@@ -363,6 +373,13 @@ body,
   flex-direction: column;
   gap: 0.5rem;
   margin-top: 1rem;
+}
+
+.primary-action-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
 }
 
 .commit-box__message {

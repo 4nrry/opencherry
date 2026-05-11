@@ -4,7 +4,7 @@
 //! agent detection. Persistence lives in the platform app config dir.
 
 use opencherry_agents::DetectedAgent;
-use opencherry_core::{CommitResult, RepoDiff, RepoId, RepoRef, RepoStatus};
+use opencherry_core::{CommitResult, RepoActionResult, RepoDiff, RepoId, RepoRef, RepoStatus};
 use opencherry_persistence as persist;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
@@ -87,6 +87,16 @@ fn unstage_repo_file(path: String, relative_path: String) -> Result<(), String> 
 }
 
 #[tauri::command]
+fn publish_repo_branch(path: String) -> Result<RepoActionResult, String> {
+    opencherry_repo::publish_branch(Path::new(&path)).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn sync_repo_changes(path: String) -> Result<RepoActionResult, String> {
+    opencherry_repo::sync_changes(Path::new(&path)).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn list_agents() -> Vec<DetectedAgent> {
     opencherry_agents::detect_running_agents()
 }
@@ -119,6 +129,8 @@ pub fn run() {
             commit_all_repo,
             stage_repo_file,
             unstage_repo_file,
+            publish_repo_branch,
+            sync_repo_changes,
             list_agents,
         ])
         .setup(|app| {

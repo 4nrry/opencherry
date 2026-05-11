@@ -3,8 +3,10 @@
 //! Backed by `git2` (vendored libgit2) for full coverage. A `gix` fast-path
 //! for batch read operations across many repos may be added later.
 
-use opencherry_core::{CommitResult, CoreError, RepoDiff, RepoDiffFile, RepoId, RepoStatus};
-use std::{collections::HashMap, path::Path};
+use opencherry_core::{
+    CommitResult, CoreError, RepoActionResult, RepoDiff, RepoDiffFile, RepoId, RepoStatus,
+};
+use std::{collections::HashMap, path::Path, process::Command};
 
 /// Smoke-test entry point: returns the short OID of HEAD or an error.
 pub fn head_short_id(path: &Path) -> anyhow::Result<String> {
@@ -172,6 +174,46 @@ pub fn commit_staged(path: &Path, message: &str) -> anyhow::Result<CommitResult>
 
 pub fn commit_all(path: &Path, message: &str) -> anyhow::Result<CommitResult> {
     commit(path, message, true)
+}
+
+pub fn publish_branch(path: &Path) -> anyhow::Result<RepoActionResult> {
+    let repo = git2::Repository::discover(path)
+        .map_err(|_| CoreError::NotARepo(path.to_path_buf()))?;
+    let head = repo.head()?;
+    if !head.is_branch() {
+        return Err(anyhow::anyhow!("cannot publish a detached HEAD"));
+    }
+
+    let branch_name = head
+        .shorthand()
+        .ok_or_else(|| anyhow::anyhow!("failed to resolve current branch"))?;
+    let remote_name = default_remote_name(&repo)?;
+    run_git(path, ["push", "-u", &remote_name, branch_name])?;
+
+    Ok(RepoActionResult {
+        summary: format!("Published {branch_name} to {remote_name}"),
+    })
+}
+
+pub fn sync_changes(path: &Path) -> anyhow::Result<RepoActionResult> {
+    let repo = git2::Repository::discover(path)
+        .map_err(|_| CoreError::NotARepo(path.to_path_buf()))?;
+    let head = repo.head()?;
+    if !head.is_branch() {
+        return Err(anyhow::anyhow!("cannot sync a detached HEAD"));
+    }
+
+    let branch_name = head
+        .shorthand()
+        .ok_or_else(|| anyhow::anyhow!("failed to resolve current branch"))?;
+    let remote_name = default_remote_name(&repo)?;
+
+    run_git(path, ["pull", "--ff-only", &remote_name, branch_name])?;
+    run_git(path, ["push", &remote_name, branch_name])?;
+
+    Ok(RepoActionResult {
+        summary: format!("Synced {branch_name} with {remote_name}"),
+    })
 }
 
 fn commit(path: &Path, message: &str, stage_all: bool) -> anyhow::Result<CommitResult> {
@@ -437,5 +479,48 @@ fn delta_status_label(status: git2::Delta) -> &'static str {
         git2::Delta::Unreadable => "unreadable",
         git2::Delta::Untracked => "untracked",
         git2::Delta::Conflicted => "conflicted",
+    }
+}
+
+fn default_remote_name(repo: &git2::Repository) -> anyhow::Result<String> {
+    if let Ok(head) = repo.head() {
+        if let Ok(branch) = head.resolve().and_then(|h| h.peel_to_commit()).and_then(|_| {
+            repo.find_branch(
+                head.shorthand().unwrap_or_default(),
+                git2::BranchType::Local,
+            )
+        }) {
+            if let Ok(upstream) = branch.upstream() {
+                if let Ok(Some(name)) = upstream.name() {
+                    if let Some((remote, _branch)) = name.split_once('/') {
+                        return Ok(remote.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    let remotes = repo.remotes()?;
+    remotes
+        .iter()
+        .flatten()
+        .find(|name| *name == "origin")
+        .or_else(|| remotes.iter().flatten().next())
+        .map(|name| name.to_string())
+        .ok_or_else(|| anyhow::anyhow!("no git remote configured"))
+}
+
+fn run_git<I, S>(path: &Path, args: I) -> anyhow::Result<()>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<std::ffi::OsStr>,
+{
+    let output = Command::new("git").args(args).current_dir(path).output()?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        Err(anyhow::anyhow!(if !stderr.is_empty() { stderr } else { stdout }))
     }
 }

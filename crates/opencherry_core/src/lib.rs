@@ -74,6 +74,11 @@ pub struct CommitResult {
     pub summary: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoActionResult {
+    pub summary: String,
+}
+
 /// Known coding-agent kinds OpenCherry can detect or orchestrate.
 ///
 /// Unknown is reserved for future extensibility and for processes that
