@@ -2530,6 +2530,7 @@ dependencies = [
  "anyhow",
  "git2",
  "opencherry_core",
+ "serde",
  "thiserror 2.0.18",
  "tracing",
 ]

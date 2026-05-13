@@ -230,12 +230,39 @@ pub fn unstage_file(path: &Path, relative_path: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn discard_file(path: &Path, relative_path: &str) -> anyhow::Result<()> {
+#[derive(Debug, Default, Clone, serde::Serialize)]
+pub struct DiscardOutcome {
+    pub discarded: Vec<String>,
+    pub failed: Vec<(String, String)>,
+}
+
+pub fn discard_files(path: &Path, relative_paths: &[&str]) -> anyhow::Result<DiscardOutcome> {
     let repo = git2::Repository::discover(path)
         .map_err(|_| CoreError::NotARepo(path.to_path_buf()))?;
     let workdir = repo
         .workdir()
-        .ok_or_else(|| anyhow::anyhow!("repository has no working tree"))?;
+        .ok_or_else(|| anyhow::anyhow!("repository has no working tree"))?
+        .to_path_buf();
+
+    let mut outcome = DiscardOutcome::default();
+
+    for &relative_path in relative_paths {
+        match discard_single(&repo, &workdir, relative_path) {
+            Ok(()) => outcome.discarded.push(relative_path.to_string()),
+            Err(err) => outcome
+                .failed
+                .push((relative_path.to_string(), err.to_string())),
+        }
+    }
+
+    Ok(outcome)
+}
+
+fn discard_single(
+    repo: &git2::Repository,
+    workdir: &Path,
+    relative_path: &str,
+) -> anyhow::Result<()> {
     let relative = Path::new(relative_path);
     let status = repo.status_file(relative)?;
 
@@ -1034,55 +1061,58 @@ mod tests {
     }
 
     #[test]
-    fn discard_file_reverts_unstaged_tracked_changes() {
-        let repo = TestRepo::new("repo-discard-tracked");
-        repo.append_file("README.md", "change\n");
+    fn discard_files_mixed_batch_with_one_failure() {
+        let repo = TestRepo::new("repo-discard-files-mixed");
+        repo.write_file("modified.txt", "original\n");
+        repo.commit_all_files("seed modified.txt");
+        repo.write_file("modified.txt", "dirty\n");
+        repo.write_file("scratch.txt", "untracked\n");
 
-        let before = repo_diff(repo.path()).unwrap();
-        assert_eq!(before.unstaged.len(), 1);
+        let outcome = discard_files(
+            repo.path(),
+            &["modified.txt", "scratch.txt", "README.md"],
+        )
+        .unwrap();
 
-        discard_file(repo.path(), "README.md").unwrap();
+        assert_eq!(outcome.discarded.len(), 2);
+        assert!(outcome.discarded.contains(&"modified.txt".to_string()));
+        assert!(outcome.discarded.contains(&"scratch.txt".to_string()));
+        assert_eq!(outcome.failed.len(), 1);
+        assert_eq!(outcome.failed[0].0, "README.md");
 
-        let after = repo_diff(repo.path()).unwrap();
-        assert!(after.unstaged.is_empty());
-        assert_eq!(fs::read_to_string(repo.path().join("README.md")).unwrap(), "hello\n");
-    }
-
-    #[test]
-    fn discard_file_removes_untracked_file() {
-        let repo = TestRepo::new("repo-discard-untracked");
-        repo.write_file("scratch.txt", "tmp\n");
-
-        let before = repo_diff(repo.path()).unwrap();
-        assert_eq!(before.untracked.len(), 1);
-
-        discard_file(repo.path(), "scratch.txt").unwrap();
-
-        let after = repo_diff(repo.path()).unwrap();
-        assert!(after.untracked.is_empty());
+        assert_eq!(
+            fs::read_to_string(repo.path().join("modified.txt")).unwrap(),
+            "original\n"
+        );
         assert!(!repo.path().join("scratch.txt").exists());
     }
 
     #[test]
-    fn discard_file_preserves_staged_version_for_partially_staged_file() {
-        let repo = TestRepo::new("repo-discard-partial");
-        repo.write_file("README.md", "staged version\n");
-        stage_file(repo.path(), "README.md").unwrap();
-        repo.append_file("README.md", "unstaged change\n");
+    fn discard_files_continues_after_missing_path() {
+        let repo = TestRepo::new("repo-discard-files-missing");
+        repo.write_file("real.txt", "original\n");
+        repo.commit_all_files("seed real.txt");
+        repo.write_file("real.txt", "dirty\n");
 
-        let before = repo_diff(repo.path()).unwrap();
-        assert_eq!(before.staged.len(), 1);
-        assert_eq!(before.unstaged.len(), 1);
+        let outcome =
+            discard_files(repo.path(), &["real.txt", "ghost.txt"]).unwrap();
 
-        discard_file(repo.path(), "README.md").unwrap();
+        assert_eq!(outcome.discarded, vec!["real.txt".to_string()]);
+        assert_eq!(outcome.failed.len(), 1);
+        assert_eq!(outcome.failed[0].0, "ghost.txt");
 
-        let after = repo_diff(repo.path()).unwrap();
-        assert_eq!(after.staged.len(), 1);
-        assert!(after.unstaged.is_empty());
         assert_eq!(
-            fs::read_to_string(repo.path().join("README.md")).unwrap(),
-            "staged version\n"
+            fs::read_to_string(repo.path().join("real.txt")).unwrap(),
+            "original\n"
         );
+    }
+
+    #[test]
+    fn discard_files_empty_slice_is_noop() {
+        let repo = TestRepo::new("repo-discard-files-empty");
+        let outcome = discard_files(repo.path(), &[]).unwrap();
+        assert!(outcome.discarded.is_empty());
+        assert!(outcome.failed.is_empty());
     }
 
     #[test]

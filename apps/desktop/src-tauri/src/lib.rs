@@ -102,8 +102,12 @@ fn unstage_repo_file(path: String, relative_path: String) -> Result<(), String> 
 }
 
 #[tauri::command]
-fn discard_repo_file(path: String, relative_path: String) -> Result<(), String> {
-    opencherry_repo::discard_file(Path::new(&path), &relative_path).map_err(|e| e.to_string())
+fn discard_repo_files(
+    path: String,
+    relative_paths: Vec<String>,
+) -> Result<opencherry_repo::DiscardOutcome, String> {
+    let refs: Vec<&str> = relative_paths.iter().map(String::as_str).collect();
+    opencherry_repo::discard_files(Path::new(&path), &refs).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -155,7 +159,7 @@ pub fn run() {
             commit_all_repo,
             stage_repo_file,
             unstage_repo_file,
-            discard_repo_file,
+            discard_repo_files,
             publish_repo_branch,
             sync_repo_changes,
             list_agents,
