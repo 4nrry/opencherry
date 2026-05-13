@@ -4,38 +4,106 @@
     sans-serif;
   font-size: 14px;
   line-height: 1.5;
-  color: #1a1a1a;
-  background: #fafafa;
+  color: var(--color-text);
+  background: var(--color-bg-window);
 
-  --sidebar-bg: #f0f0f0;
-  --sidebar-border: rgba(0, 0, 0, 0.08);
-  --selected-bg: rgba(220, 38, 47, 0.12);
-  --selected-fg: #b91c1c;
-  --card-bg: #ffffff;
-  --card-border: rgba(0, 0, 0, 0.08);
-  --muted: rgba(0, 0, 0, 0.55);
-  --warn-fg: #b45309;
-  --warn-bg: rgba(245, 158, 11, 0.12);
-  --ok-fg: #047857;
-  --ok-bg: rgba(16, 185, 129, 0.12);
+  /* Spacing — libcosmic Standard density */
+  --space-none:  0;
+  --space-xxxs:  4px;
+  --space-xxs:   8px;
+  --space-xs:   12px;
+  --space-s:    16px;
+  --space-m:    24px;
+  --space-l:    32px;
+  --space-xl:   48px;
+  --space-xxl:  64px;
+  --space-xxxl: 128px;
+
+  /* Radius */
+  --radius-xs:   4px;
+  --radius-s:    6px;
+  --radius-m:    8px;
+  --radius-full: 999px;
+
+  /* Component states */
+  --color-component-base:        #ffffff;
+  --color-component-hover:       rgba(0, 0, 0, 0.06);
+  --color-component-pressed:     rgba(0, 0, 0, 0.10);
+  --color-component-selected-bg: rgba(220, 38, 47, 0.12);
+  --color-component-selected-fg: #b91c1c;
+  --color-component-focus:       #b91c1c;
+  --color-component-disabled:    rgba(0, 0, 0, 0.35);
+  --color-component-border:      rgba(0, 0, 0, 0.08);
+
+  /* Container backgrounds */
+  --color-bg-window:  #fafafa;
+  --color-bg-sidebar: #f0f0f0;
+  --color-bg-card:    #ffffff;
+
+  /* Text + semantic */
+  --color-text:        #1a1a1a;
+  --color-text-muted:  rgba(0, 0, 0, 0.55);
+  --color-warn-fg:     #b45309;
+  --color-warn-bg:     rgba(245, 158, 11, 0.12);
+  --color-ok-fg:       #047857;
+  --color-ok-bg:       rgba(16, 185, 129, 0.12);
+  --color-danger-fg:   #b91c1c;
+  --color-danger-bg:   rgba(220, 38, 38, 0.15);
+
+  /* Agent palette (theme-invariant) */
+  --color-agent-active: #58a6ff;
+  --color-agent-idle:   #6e7681;
+
+  /* Typography */
+  --font-size-xs:   0.6875rem;
+  --font-size-s:    0.75rem;
+  --font-size-m:    0.8125rem;
+  --font-size-base: 0.875rem;
+  --font-size-l:    1rem;
+  --font-size-xl:   1.5rem;
+  --font-size-xxl:  2rem;
+  --font-mono: ui-monospace, "JetBrains Mono", "Fira Code", monospace;
+
+  /* TEMP aliases — removed in Task 2 */
+  --sidebar-bg:     var(--color-bg-sidebar);
+  --sidebar-border: var(--color-component-border);
+  --card-bg:        var(--color-bg-card);
+  --card-border:    var(--color-component-border);
+  --selected-bg:    var(--color-component-selected-bg);
+  --selected-fg:    var(--color-component-selected-fg);
+  --muted:          var(--color-text-muted);
+  --warn-fg:        var(--color-warn-fg);
+  --warn-bg:        var(--color-warn-bg);
+  --ok-fg:          var(--color-ok-fg);
+  --ok-bg:          var(--color-ok-bg);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    color: #e6e6e6;
-    background: #1c1c1e;
+    --color-bg-window:  #1c1c1e;
+    --color-bg-sidebar: #232325;
+    --color-bg-card:    #2a2a2c;
 
-    --sidebar-bg: #232325;
-    --sidebar-border: rgba(255, 255, 255, 0.08);
-    --selected-bg: rgba(220, 38, 47, 0.2);
-    --selected-fg: #fca5a5;
-    --card-bg: #2a2a2c;
-    --card-border: rgba(255, 255, 255, 0.08);
-    --muted: rgba(255, 255, 255, 0.55);
-    --warn-fg: #fcd34d;
-    --warn-bg: rgba(245, 158, 11, 0.18);
-    --ok-fg: #6ee7b7;
-    --ok-bg: rgba(16, 185, 129, 0.18);
+    --color-text:       #e6e6e6;
+    --color-text-muted: rgba(255, 255, 255, 0.55);
+
+    --color-component-base:        #2a2a2c;
+    --color-component-hover:       rgba(255, 255, 255, 0.06);
+    --color-component-pressed:     rgba(255, 255, 255, 0.10);
+    --color-component-selected-bg: rgba(220, 38, 47, 0.20);
+    --color-component-selected-fg: #fca5a5;
+    --color-component-focus:       #fca5a5;
+    --color-component-disabled:    rgba(255, 255, 255, 0.35);
+    --color-component-border:      rgba(255, 255, 255, 0.08);
+
+    --color-warn-fg:   #fcd34d;
+    --color-warn-bg:   rgba(245, 158, 11, 0.18);
+    --color-ok-fg:     #6ee7b7;
+    --color-ok-bg:     rgba(16, 185, 129, 0.18);
+    --color-danger-fg: #fca5a5;
+    --color-danger-bg: rgba(220, 38, 38, 0.20);
+
+    /* aliases inherit via var() chain — no overrides needed here */
   }
 }
 
