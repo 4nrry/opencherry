@@ -271,7 +271,10 @@ describe("TargetAgentsPanel", () => {
 describe("DiffGroup", () => {
   it("renders grouped files and calls the configured action buttons", async () => {
     const onAction = vi.fn().mockResolvedValue(undefined);
-    const onSecondaryAction = vi.fn().mockResolvedValue(undefined);
+    const onDiscard = vi
+      .fn()
+      .mockResolvedValue({ discarded: ["src/App.tsx"], failed: [] });
+    const requestConfirm = vi.fn();
     render(() => (
       <DiffGroup
         title="Unstaged"
@@ -286,8 +289,8 @@ describe("DiffGroup", () => {
         ]}
         actionLabel="Stage"
         onAction={onAction}
-        secondaryActionLabel="Discard"
-        onSecondaryAction={onSecondaryAction}
+        requestConfirm={requestConfirm}
+        onDiscard={onDiscard}
       />
     ));
 
@@ -300,14 +303,33 @@ describe("DiffGroup", () => {
     await waitFor(() => expect(onAction).toHaveBeenCalledWith("src/App.tsx"));
 
     fireEvent.click(screen.getByRole("button", { name: "Discard" }));
-    await waitFor(() => expect(onSecondaryAction).toHaveBeenCalledWith("src/App.tsx"));
+    expect(requestConfirm).toHaveBeenCalledTimes(1);
+    const perFileRequest = requestConfirm.mock.calls[0][0];
+    expect(perFileRequest.title).toBe("Discard changes?");
+    expect(perFileRequest.confirmLabel).toBe("Discard changes");
+
+    fireEvent.click(screen.getByRole("button", { name: "Discard all" }));
+    expect(requestConfirm).toHaveBeenCalledTimes(2);
+    const allRequest = requestConfirm.mock.calls[1][0];
+    expect(allRequest.title).toBe("Discard 1 unstaged file?");
+    expect(allRequest.confirmLabel).toBe("Discard all");
+
+    // Confirm callbacks invoke onDiscard with the right paths
+    await perFileRequest.onConfirm();
+    expect(onDiscard).toHaveBeenCalledWith(["src/App.tsx"]);
   });
 });
 
 describe("DiffPanel", () => {
   it("renders all existing groups and invokes stage, unstage, and discard commands", async () => {
-    invokeMock.mockResolvedValue(undefined);
+    invokeMock.mockImplementation((command: string) => {
+      if (command === "discard_repo_files") {
+        return Promise.resolve({ discarded: [], failed: [] });
+      }
+      return Promise.resolve(undefined);
+    });
     const onChange = vi.fn().mockResolvedValue(undefined);
+    const requestConfirm = vi.fn();
     render(() => (
       <DiffPanel
         repoPath="/repo"
@@ -320,6 +342,7 @@ describe("DiffPanel", () => {
           }),
         )}
         onChange={onChange}
+        requestConfirm={requestConfirm}
       />
     ));
 
@@ -346,14 +369,96 @@ describe("DiffPanel", () => {
       }),
     );
 
+    // Per-file Discard now goes through requestConfirm
     const discardButtons = screen.getAllByRole("button", { name: "Discard" });
     fireEvent.click(discardButtons[0]);
+    expect(requestConfirm).toHaveBeenCalledTimes(1);
+    const req = requestConfirm.mock.calls[0][0];
+    expect(req.title).toBe("Discard changes?");
+    await req.onConfirm();
     await waitFor(() =>
-      expect(invokeMock).toHaveBeenCalledWith("discard_repo_file", {
+      expect(invokeMock).toHaveBeenCalledWith("discard_repo_files", {
         path: "/repo",
-        relativePath: "unstaged.txt",
+        relativePaths: ["unstaged.txt"],
       }),
     );
+  });
+
+  it("Discard all in Unstaged invokes batch with every path", async () => {
+    invokeMock.mockImplementation((command: string) => {
+      if (command === "discard_repo_files") {
+        return Promise.resolve({
+          discarded: ["a.txt", "b.txt", "c.txt"],
+          failed: [],
+        });
+      }
+      return Promise.resolve(undefined);
+    });
+    const onChange = vi.fn().mockResolvedValue(undefined);
+    const requestConfirm = vi.fn();
+    render(() => (
+      <DiffPanel
+        repoPath="/repo"
+        diff={resourceOf(
+          makeRepoDiff({
+            unstaged: [
+              { path: "a.txt", status: "modified", additions: 1, deletions: 0, patch: "+a" },
+              { path: "b.txt", status: "modified", additions: 1, deletions: 0, patch: "+b" },
+              { path: "c.txt", status: "modified", additions: 1, deletions: 0, patch: "+c" },
+            ],
+          }),
+        )}
+        onChange={onChange}
+        requestConfirm={requestConfirm}
+      />
+    ));
+
+    fireEvent.click(screen.getByRole("button", { name: "Discard all" }));
+    expect(requestConfirm).toHaveBeenCalledTimes(1);
+    const req = requestConfirm.mock.calls[0][0];
+    expect(req.title).toBe("Discard 3 unstaged files?");
+    expect(req.confirmLabel).toBe("Discard all");
+
+    await req.onConfirm();
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("discard_repo_files", {
+        path: "/repo",
+        relativePaths: ["a.txt", "b.txt", "c.txt"],
+      }),
+    );
+  });
+
+  it("onDiscard surfaces partial-failure outcomes that DiffGroup converts into a thrown error", async () => {
+    invokeMock.mockImplementation((command: string) => {
+      if (command === "discard_repo_files") {
+        return Promise.resolve({
+          discarded: [],
+          failed: [["ghost.txt", "no such file"]],
+        });
+      }
+      return Promise.resolve(undefined);
+    });
+    const onChange = vi.fn().mockResolvedValue(undefined);
+    const requestConfirm = vi.fn();
+    render(() => (
+      <DiffPanel
+        repoPath="/repo"
+        diff={resourceOf(
+          makeRepoDiff({
+            unstaged: [
+              { path: "ghost.txt", status: "modified", additions: 0, deletions: 0, patch: "" },
+            ],
+          }),
+        )}
+        onChange={onChange}
+        requestConfirm={requestConfirm}
+      />
+    ));
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Discard" })[0]);
+    const req = requestConfirm.mock.calls[0][0];
+    await expect(req.onConfirm()).rejects.toThrow(/ghost\.txt/);
+    await expect(req.onConfirm()).rejects.toThrow(/no such file/);
   });
 });
 
@@ -426,7 +531,7 @@ describe("App", () => {
           return Promise.resolve({ summary: "Synced main with origin" });
         case "stage_repo_file":
         case "unstage_repo_file":
-        case "discard_repo_file":
+        case "discard_repo_files":
         case "unregister_repo":
         case "register_repo":
           return Promise.resolve(undefined);
@@ -503,7 +608,7 @@ describe("App", () => {
           return Promise.resolve({ summary: "Synced main with origin" });
         case "stage_repo_file":
         case "unstage_repo_file":
-        case "discard_repo_file":
+        case "discard_repo_files":
         case "unregister_repo":
         case "register_repo":
           return Promise.resolve(undefined);
@@ -573,7 +678,7 @@ describe("App", () => {
           return Promise.resolve({ summary: "Synced main with origin" });
         case "stage_repo_file":
         case "unstage_repo_file":
-        case "discard_repo_file":
+        case "discard_repo_files":
         case "unregister_repo":
         case "register_repo":
           return Promise.resolve(undefined);
@@ -666,7 +771,7 @@ describe("App", () => {
           return Promise.resolve({ summary: "Synced main with origin" });
         case "stage_repo_file":
         case "unstage_repo_file":
-        case "discard_repo_file":
+        case "discard_repo_files":
         case "unregister_repo":
         case "register_repo":
           return Promise.resolve(undefined);
@@ -767,7 +872,7 @@ describe("App", () => {
           return Promise.resolve({ summary: "Synced main with origin" });
         case "stage_repo_file":
         case "unstage_repo_file":
-        case "discard_repo_file":
+        case "discard_repo_files":
         case "unregister_repo":
         case "register_repo":
           return Promise.resolve(undefined);
@@ -862,7 +967,7 @@ describe("App", () => {
           return Promise.resolve({ summary: "Synced main with origin" });
         case "stage_repo_file":
         case "unstage_repo_file":
-        case "discard_repo_file":
+        case "discard_repo_files":
         case "unregister_repo":
         case "register_repo":
           return Promise.resolve(undefined);
@@ -931,7 +1036,7 @@ describe("App", () => {
           return Promise.resolve({ summary: "Synced main with origin" });
         case "stage_repo_file":
         case "unstage_repo_file":
-        case "discard_repo_file":
+        case "discard_repo_files":
         case "unregister_repo":
         case "register_repo":
           return Promise.resolve(undefined);
@@ -1001,7 +1106,7 @@ describe("App", () => {
           return Promise.resolve({ summary: "Synced main with origin" });
         case "stage_repo_file":
         case "unstage_repo_file":
-        case "discard_repo_file":
+        case "discard_repo_files":
         case "unregister_repo":
           return Promise.resolve(undefined);
         default:
@@ -1092,7 +1197,7 @@ describe("App", () => {
           return Promise.resolve({ summary: "Synced main with origin" });
         case "stage_repo_file":
         case "unstage_repo_file":
-        case "discard_repo_file":
+        case "discard_repo_files":
         case "unregister_repo":
           return Promise.resolve(undefined);
         default:
@@ -1186,7 +1291,7 @@ describe("App", () => {
           return Promise.resolve({ summary: "Synced main with origin" });
         case "stage_repo_file":
         case "unstage_repo_file":
-        case "discard_repo_file":
+        case "discard_repo_files":
         case "unregister_repo":
           return Promise.resolve(undefined);
         default:

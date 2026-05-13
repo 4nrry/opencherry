@@ -44,6 +44,11 @@ export interface RepoActionResult {
   summary: string;
 }
 
+export interface DiscardOutcome {
+  discarded: string[];
+  failed: [string, string][];
+}
+
 export interface RepoChangeCounts {
   staged: number;
   unstaged: number;

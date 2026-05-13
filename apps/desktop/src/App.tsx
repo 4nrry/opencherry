@@ -13,12 +13,14 @@ import { open } from "@tauri-apps/plugin-dialog";
 import type {
   CommitResult,
   DetectedAgent,
+  DiscardOutcome,
   RepoActionResult,
   RepoDiff,
   RepoGroupSnapshot,
   RepoRef,
   RepoStatus,
 } from "./types";
+import { ConfirmDialog, type ConfirmRequest } from "./ConfirmDialog";
 
 type GroupRepoFilter = "all" | "untracked" | "tracked" | "dirty";
 type GroupAgentFilter = "all" | "with-agents" | "without-agents";
@@ -69,8 +71,14 @@ async function unstageFile(path: string, relativePath: string): Promise<void> {
   await invoke("unstage_repo_file", { path, relativePath });
 }
 
-async function discardFile(path: string, relativePath: string): Promise<void> {
-  await invoke("discard_repo_file", { path, relativePath });
+async function discardFiles(
+  path: string,
+  relativePaths: string[],
+): Promise<DiscardOutcome> {
+  return await invoke<DiscardOutcome>("discard_repo_files", {
+    path,
+    relativePaths,
+  });
 }
 
 async function publishBranch(path: string): Promise<RepoActionResult> {
@@ -89,7 +97,7 @@ export const __testables = {
   fetchGroupSnapshot,
   stageFile,
   unstageFile,
-  discardFile,
+  discardFiles,
   publishBranch,
   syncChanges,
 };
@@ -99,6 +107,9 @@ export default function App() {
   const [agents, { refetch: refetchAgents }] = createResource(fetchAgents);
   const [selected, setSelected] = createSignal<RepoRef | null>(null);
   const [error, setError] = createSignal<string | null>(null);
+  const [confirmRequest, setConfirmRequest] =
+    createSignal<ConfirmRequest | null>(null);
+  const requestConfirm = (req: ConfirmRequest) => setConfirmRequest(req);
   const trackedRepoPaths = () =>
     new Set((repos() ?? []).filter((repo) => repo.kind === "repo").map((repo) => repo.path));
   const repoAgentCount = (repo: RepoRef) =>
@@ -146,6 +157,7 @@ export default function App() {
   }
 
   return (
+    <>
     <div class="layout">
       <aside class="sidebar">
         <div class="sidebar__header">
@@ -204,7 +216,7 @@ export default function App() {
             </div>
           }
         >
-          <Show when={selected()?.kind === "group"} fallback={<RepoView repo={selected()!} agents={agents() ?? []} />}>
+          <Show when={selected()?.kind === "group"} fallback={<RepoView repo={selected()!} agents={agents() ?? []} requestConfirm={requestConfirm} />}>
             <RepoGroupView
               group={selected()!}
               agents={agents() ?? []}
@@ -247,6 +259,11 @@ export default function App() {
         <AgentsPanel agents={agents} />
       </main>
     </div>
+    <ConfirmDialog
+      request={confirmRequest()}
+      onClose={() => setConfirmRequest(null)}
+    />
+    </>
   );
 }
 
@@ -494,7 +511,11 @@ function RepoGroupView(props: {
   );
 }
 
-function RepoView(props: { repo: RepoRef; agents: DetectedAgent[] }) {
+function RepoView(props: {
+  repo: RepoRef;
+  agents: DetectedAgent[];
+  requestConfirm: (req: ConfirmRequest) => void;
+}) {
   const [status, { refetch }] = createResource(
     () => props.repo.path,
     (p) => fetchStatus(p),
@@ -687,6 +708,7 @@ function RepoView(props: { repo: RepoRef; agents: DetectedAgent[] }) {
           await refetch();
           await refetchDiff();
         }}
+        requestConfirm={props.requestConfirm}
       />
     </section>
   );
@@ -774,6 +796,7 @@ export function DiffPanel(props: {
   repoPath: string;
   diff: Resource<RepoDiff>;
   onChange: () => Promise<void>;
+  requestConfirm: (req: ConfirmRequest) => void;
 }) {
   const totalFiles = () => {
     const diff = props.diff();
@@ -784,6 +807,14 @@ export function DiffPanel(props: {
       diff.untracked.length +
       diff.conflicted.length
     );
+  };
+
+  const onDiscard = async (
+    relativePaths: string[],
+  ): Promise<DiscardOutcome> => {
+    const outcome = await discardFiles(props.repoPath, relativePaths);
+    await props.onChange();
+    return outcome;
   };
 
   return (
@@ -809,21 +840,29 @@ export function DiffPanel(props: {
             files={props.diff()?.unstaged ?? []}
             actionLabel="Stage"
             onAction={(relativePath) => stageFile(props.repoPath, relativePath).then(props.onChange)}
-            secondaryActionLabel="Discard"
-            onSecondaryAction={(relativePath) => discardFile(props.repoPath, relativePath).then(props.onChange)}
+            requestConfirm={props.requestConfirm}
+            onDiscard={onDiscard}
           />
           <DiffGroup
             title="Untracked"
             files={props.diff()?.untracked ?? []}
             actionLabel="Stage"
             onAction={(relativePath) => stageFile(props.repoPath, relativePath).then(props.onChange)}
-            secondaryActionLabel="Discard"
-            onSecondaryAction={(relativePath) => discardFile(props.repoPath, relativePath).then(props.onChange)}
+            requestConfirm={props.requestConfirm}
+            onDiscard={onDiscard}
           />
         </>
       </Show>
     </section>
   );
+}
+
+function formatFailedOutcome(outcome: DiscardOutcome): string {
+  const total = outcome.discarded.length + outcome.failed.length;
+  const lines = outcome.failed
+    .map(([path, message]) => `${path}: ${message}`)
+    .join("\n");
+  return `Failed to discard ${outcome.failed.length} of ${total} files:\n${lines}`;
 }
 
 export function DiffGroup(props: {
@@ -832,9 +871,61 @@ export function DiffGroup(props: {
   tone?: "warn";
   actionLabel?: string;
   onAction?: (relativePath: string) => Promise<void>;
-  secondaryActionLabel?: string;
-  onSecondaryAction?: (relativePath: string) => Promise<void>;
+  requestConfirm?: (req: ConfirmRequest) => void;
+  onDiscard?: (relativePaths: string[]) => Promise<DiscardOutcome>;
 }) {
+  const canDiscard = () =>
+    props.requestConfirm !== undefined &&
+    props.onDiscard !== undefined &&
+    (props.title === "Unstaged" || props.title === "Untracked");
+
+  const requestDiscardAll = () => {
+    if (!canDiscard()) return;
+    const paths = props.files.map((f) => f.path);
+    const groupKind = props.title.toLowerCase();
+    const title =
+      paths.length === 1
+        ? `Discard 1 ${groupKind} file?`
+        : `Discard ${paths.length} ${groupKind} files?`;
+    const visible = paths.slice(0, 6);
+    const overflow = paths.length - visible.length;
+    props.requestConfirm!({
+      title,
+      body: (
+        <div class="confirm-dialog__file-list">
+          <For each={visible}>{(p) => <code>{p}</code>}</For>
+          <Show when={overflow > 0}>
+            <span>… and {overflow} more</span>
+          </Show>
+        </div>
+      ),
+      confirmLabel: "Discard all",
+      confirmTone: "danger",
+      onConfirm: async () => {
+        const outcome = await props.onDiscard!(paths);
+        if (outcome.failed.length > 0) {
+          throw new Error(formatFailedOutcome(outcome));
+        }
+      },
+    });
+  };
+
+  const requestDiscardOne = (path: string) => {
+    if (!canDiscard()) return;
+    props.requestConfirm!({
+      title: "Discard changes?",
+      body: <code class="confirm-dialog__path">{path}</code>,
+      confirmLabel: "Discard changes",
+      confirmTone: "danger",
+      onConfirm: async () => {
+        const outcome = await props.onDiscard!([path]);
+        if (outcome.failed.length > 0) {
+          throw new Error(formatFailedOutcome(outcome));
+        }
+      },
+    });
+  };
+
   return (
     <Show when={props.files.length > 0}>
       <section class="diff-group" data-diff-group={props.title.toLowerCase()}>
@@ -843,6 +934,17 @@ export function DiffGroup(props: {
           <span class={`diff-group__count${props.tone ? ` diff-group__count--${props.tone}` : ""}`}>
             {props.files.length}
           </span>
+          <Show when={canDiscard() && props.files.length > 0}>
+            <div class="diff-group__header-actions">
+              <button
+                type="button"
+                class="btn btn--tiny"
+                onClick={requestDiscardAll}
+              >
+                Discard all
+              </button>
+            </div>
+          </Show>
         </header>
 
         <For each={props.files}>
@@ -865,12 +967,12 @@ export function DiffGroup(props: {
                       {props.actionLabel}
                     </button>
                   </Show>
-                  <Show when={props.secondaryActionLabel && props.onSecondaryAction}>
+                  <Show when={canDiscard()}>
                     <button
                       class="btn btn--tiny"
-                      onClick={() => void props.onSecondaryAction?.(file.path)}
+                      onClick={() => requestDiscardOne(file.path)}
                     >
-                      {props.secondaryActionLabel}
+                      Discard
                     </button>
                   </Show>
                 </div>
