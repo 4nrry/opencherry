@@ -557,7 +557,7 @@ function RepoView(props: { repo: RepoRef; agents: DetectedAgent[] }) {
     }
   }
 
-  async function runPrimaryAction(kind: "commit" | "publish" | "sync") {
+  async function runPrimaryAction(kind: PrimaryActionKind) {
     setCommitError(null);
     setCommitResult(null);
     setActionResult(null);
@@ -567,7 +567,12 @@ function RepoView(props: { repo: RepoRef; agents: DetectedAgent[] }) {
         await commit();
         return;
       }
+      if (kind === "stage-all") {
+        await commitAll();
+        return;
+      }
 
+      // publish | push | pull | sync — push and pull share the sync backend for now
       const result =
         kind === "publish"
           ? await publishBranch(props.repo.path)
@@ -601,6 +606,7 @@ function RepoView(props: { repo: RepoRef; agents: DetectedAgent[] }) {
               status={s()}
               diff={diff()}
               onRun={runPrimaryAction}
+              messageEmpty={message().trim().length === 0}
             />
 
             <div class="status-grid">
@@ -686,48 +692,81 @@ function RepoView(props: { repo: RepoRef; agents: DetectedAgent[] }) {
   );
 }
 
+export type PrimaryActionKind =
+  | "commit"
+  | "stage-all"
+  | "publish"
+  | "push"
+  | "pull"
+  | "sync";
+
+type PrimaryActionDescriptor = {
+  kind: PrimaryActionKind | "idle";
+  label: string;
+  needsMessage: boolean;
+};
+
 export function RepoPrimaryActionBar(props: {
   status: RepoStatus;
   diff: RepoDiff | undefined;
-  onRun: (kind: "commit" | "publish" | "sync") => Promise<void>;
+  onRun: (kind: PrimaryActionKind) => Promise<void>;
+  messageEmpty?: boolean;
 }) {
   const stagedCount = () => props.diff?.staged.length ?? 0;
-  const hasDirty = () =>
-    (props.diff?.staged.length ?? 0) +
-      (props.diff?.unstaged.length ?? 0) +
-      (props.diff?.untracked.length ?? 0) +
-      (props.diff?.conflicted.length ?? 0) >
-    0;
+  const unstagedCount = () =>
+    (props.diff?.unstaged.length ?? 0) + (props.diff?.untracked.length ?? 0);
   const canPublish = () => !!props.status.branch && !props.status.upstream;
-  const canSync = () =>
-    !!props.status.upstream &&
-    ((props.status.ahead ?? 0) > 0 || (props.status.behind ?? 0) > 0);
+  const ahead = () => props.status.ahead ?? 0;
+  const behind = () => props.status.behind ?? 0;
+  const hasUpstream = () => !!props.status.upstream;
 
-  const action = () => {
-    if (stagedCount() > 0) return { kind: "commit" as const, label: `Commit staged (${stagedCount()})` };
-    if (canPublish()) return { kind: "publish" as const, label: "Publish branch" };
-    if (canSync()) {
-      const ahead = props.status.ahead ?? 0;
-      const behind = props.status.behind ?? 0;
-      return { kind: "sync" as const, label: `Sync changes${behind ? ` ↓${behind}` : ""}${ahead ? ` ↑${ahead}` : ""}` };
+  const action = (): PrimaryActionDescriptor => {
+    if (stagedCount() > 0) {
+      return {
+        kind: "commit",
+        label: `Commit staged (${stagedCount()})`,
+        needsMessage: true,
+      };
     }
-    return null;
+    if (unstagedCount() > 0) {
+      return { kind: "stage-all", label: "Stage all & commit", needsMessage: true };
+    }
+    if (canPublish()) {
+      return { kind: "publish", label: "Publish branch", needsMessage: false };
+    }
+    if (hasUpstream() && ahead() > 0 && behind() > 0) {
+      return {
+        kind: "sync",
+        label: `Sync changes ↓${behind()} ↑${ahead()}`,
+        needsMessage: false,
+      };
+    }
+    if (hasUpstream() && ahead() > 0) {
+      return { kind: "push", label: `Push ↑${ahead()}`, needsMessage: false };
+    }
+    if (hasUpstream() && behind() > 0) {
+      return { kind: "pull", label: `Pull ↓${behind()}`, needsMessage: false };
+    }
+    return { kind: "idle", label: "Up to date", needsMessage: false };
   };
 
   return (
-    <Show when={action()}>
-      {(current) => (
-        <section class="primary-action-bar">
-          <button
-            class="btn btn--primary"
-            disabled={current().kind === "commit" ? stagedCount() === 0 : !hasDirty() && current().kind !== "sync"}
-            onClick={() => void props.onRun(current().kind)}
-          >
-            {current().label}
-          </button>
-        </section>
-      )}
-    </Show>
+    <section class="primary-action-bar">
+      <button
+        class="btn btn--primary"
+        disabled={
+          action().kind === "idle" ||
+          (action().needsMessage && (props.messageEmpty ?? false))
+        }
+        onClick={() => {
+          const a = action();
+          if (a.kind === "idle") return;
+          void props.onRun(a.kind);
+        }}
+      >
+        {action().label}
+      </button>
+    </section>
   );
 }
 
@@ -863,7 +902,7 @@ function StatusCard(props: {
   );
 }
 
-function TargetAgentsPanel(props: { title: string; agents: DetectedAgent[]; empty: string }) {
+export function TargetAgentsPanel(props: { title: string; agents: DetectedAgent[]; empty: string }) {
   return (
     <section class="agents target-agents">
       <header class="agents__header">
@@ -876,21 +915,49 @@ function TargetAgentsPanel(props: { title: string; agents: DetectedAgent[]; empt
       >
         <ul class="agents__list">
           <For each={props.agents}>
-            {(a) => (
-              <li class="agents__item">
-                <div class="agents__name">{a.display_name}</div>
-                <div class="agents__meta">
-                  <span class="agents__kind">{a.kind}</span>
-                  <Show when={a.cwd}>
-                    {(cwd) => <code class="agents__cwd">{cwd()}</code>}
-                  </Show>
-                </div>
-              </li>
-            )}
+            {(a) => <AgentRow agent={a} />}
           </For>
         </ul>
       </Show>
     </section>
+  );
+}
+
+function AgentRow(props: { agent: DetectedAgent }) {
+  const status = () => props.agent.status ?? "idle";
+  const isSubprocess = () => Boolean(props.agent.parent_id);
+  return (
+    <li class={`agents__item${isSubprocess() ? " agents__item--subprocess" : ""}`}>
+      <div class="agents__name">
+        <span
+          class={`agent-status agent-status--${status()}`}
+          aria-label={status()}
+          title={status()}
+        />
+        {props.agent.display_name}
+      </div>
+      <div class="agents__meta">
+        <Show when={isSubprocess()}>
+          <span
+            class="agents__subprocess"
+            title={`subprocess of ${props.agent.parent_id}`}
+          >
+            ↳ subprocess
+          </span>
+        </Show>
+        <span class="agents__kind">{props.agent.kind}</span>
+        <Show when={props.agent.targets.repos.length > 0}>
+          <span class="agents__repos">
+            <For each={props.agent.targets.repos}>
+              {(repo) => <span class="agents__repo">{repo.display_name}</span>}
+            </For>
+          </span>
+        </Show>
+        <Show when={props.agent.cwd}>
+          {(cwd) => <code class="agents__cwd">{cwd()}</code>}
+        </Show>
+      </div>
+    </li>
   );
 }
 
@@ -920,17 +987,7 @@ function AgentsPanel(props: { agents: Resource<DetectedAgent[]> }) {
       >
         <ul class="agents__list">
           <For each={props.agents()}>
-            {(a) => (
-              <li class="agents__item">
-                <div class="agents__name">{a.display_name}</div>
-                <div class="agents__meta">
-                  <span class="agents__kind">{a.kind}</span>
-                  <Show when={a.cwd}>
-                    {(cwd) => <code class="agents__cwd">{cwd()}</code>}
-                  </Show>
-                </div>
-              </li>
-            )}
+            {(a) => <AgentRow agent={a} />}
           </For>
         </ul>
       </Show>

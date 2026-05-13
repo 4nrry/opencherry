@@ -73,6 +73,8 @@ export type AgentKind =
   | "copilot-cli"
   | "unknown";
 
+export type AgentStatus = "idle" | "generating";
+
 export interface DetectedAgent {
   id: string;
   kind: AgentKind;
@@ -81,6 +83,16 @@ export interface DetectedAgent {
   cwd: string | null;
   command_line: string;
   targets: AgentTargetMatches;
+  /**
+   * Inferred from CPU usage. Optional so existing test fixtures stay valid;
+   * production data from `opencherry_agents` always sets it.
+   */
+  status?: AgentStatus;
+  /**
+   * If the process's parent is also a detected agent, the parent's id.
+   * Used to render subprocesses as children of their primary agent.
+   */
+  parent_id?: string | null;
 }
 
 export interface AgentTargetMatches {

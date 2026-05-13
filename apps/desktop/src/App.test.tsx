@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@solidjs/testing-library";
 import { createSignal, type Resource } from "solid-js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import App, { DiffGroup, DiffPanel, RepoPrimaryActionBar } from "./App";
+import App, { DiffGroup, DiffPanel, RepoPrimaryActionBar, TargetAgentsPanel } from "./App";
 import type { CommitResult, DetectedAgent, RepoDiff, RepoGroupSnapshot, RepoRef, RepoStatus } from "./types";
 
 const invokeMock = vi.fn();
@@ -62,7 +62,7 @@ describe("RepoPrimaryActionBar", () => {
     render(() => (
       <RepoPrimaryActionBar
         status={makeRepoStatus({ branch: "feature", upstream: null })}
-        diff={makeRepoDiff({ unstaged: [{ path: "a.ts", status: "modified", additions: 1, deletions: 0, patch: "+a" }] })}
+        diff={makeRepoDiff()}
         onRun={onRun}
       />
     ));
@@ -78,6 +78,193 @@ describe("RepoPrimaryActionBar", () => {
       />
     ));
     expect(screen.getByRole("button", { name: "Sync changes ↓1 ↑2" })).toBeInTheDocument();
+  });
+
+  it("renders Push when ahead-only", async () => {
+    const onRun = vi.fn().mockResolvedValue(undefined);
+    render(() => (
+      <RepoPrimaryActionBar
+        status={makeRepoStatus({ ahead: 3, behind: 0, upstream: "origin/main" })}
+        diff={makeRepoDiff()}
+        onRun={onRun}
+      />
+    ));
+    const btn = screen.getByRole("button", { name: "Push ↑3" });
+    expect(btn).toBeInTheDocument();
+    fireEvent.click(btn);
+    await waitFor(() => expect(onRun).toHaveBeenCalledWith("push"));
+  });
+
+  it("renders Pull when behind-only", async () => {
+    const onRun = vi.fn().mockResolvedValue(undefined);
+    render(() => (
+      <RepoPrimaryActionBar
+        status={makeRepoStatus({ ahead: 0, behind: 2, upstream: "origin/main" })}
+        diff={makeRepoDiff()}
+        onRun={onRun}
+      />
+    ));
+    const btn = screen.getByRole("button", { name: "Pull ↓2" });
+    expect(btn).toBeInTheDocument();
+    fireEvent.click(btn);
+    await waitFor(() => expect(onRun).toHaveBeenCalledWith("pull"));
+  });
+
+  it("renders Up to date disabled when clean and synced", () => {
+    const onRun = vi.fn().mockResolvedValue(undefined);
+    render(() => (
+      <RepoPrimaryActionBar
+        status={makeRepoStatus({ ahead: 0, behind: 0, upstream: "origin/main" })}
+        diff={makeRepoDiff()}
+        onRun={onRun}
+      />
+    ));
+    const btn = screen.getByRole("button", { name: "Up to date" });
+    expect(btn).toBeInTheDocument();
+    expect(btn).toBeDisabled();
+  });
+
+  it("renders Stage all & commit when only unstaged changes exist", async () => {
+    const onRun = vi.fn().mockResolvedValue(undefined);
+    render(() => (
+      <RepoPrimaryActionBar
+        status={makeRepoStatus({ ahead: 0, behind: 0, upstream: "origin/main" })}
+        diff={makeRepoDiff({
+          unstaged: [{ path: "a.ts", status: "modified", additions: 1, deletions: 0, patch: "+a" }],
+        })}
+        onRun={onRun}
+      />
+    ));
+    const btn = screen.getByRole("button", { name: "Stage all & commit" });
+    expect(btn).toBeInTheDocument();
+    fireEvent.click(btn);
+    await waitFor(() => expect(onRun).toHaveBeenCalledWith("stage-all"));
+  });
+
+  it("disables commit and stage-all when messageEmpty is true", () => {
+    const onRun = vi.fn().mockResolvedValue(undefined);
+    const commitView = render(() => (
+      <RepoPrimaryActionBar
+        status={makeRepoStatus({ upstream: "origin/main" })}
+        diff={makeRepoDiff({
+          staged: [{ path: "a.ts", status: "modified", additions: 1, deletions: 0, patch: "+a" }],
+        })}
+        onRun={onRun}
+        messageEmpty
+      />
+    ));
+    expect(screen.getByRole("button", { name: "Commit staged (1)" })).toBeDisabled();
+    commitView.unmount();
+
+    render(() => (
+      <RepoPrimaryActionBar
+        status={makeRepoStatus({ upstream: "origin/main" })}
+        diff={makeRepoDiff({
+          unstaged: [{ path: "a.ts", status: "modified", additions: 1, deletions: 0, patch: "+a" }],
+        })}
+        onRun={onRun}
+        messageEmpty
+      />
+    ));
+    expect(screen.getByRole("button", { name: "Stage all & commit" })).toBeDisabled();
+  });
+});
+
+describe("TargetAgentsPanel", () => {
+  function makeAgent(overrides: Partial<DetectedAgent> = {}): DetectedAgent {
+    return {
+      id: "agent-1",
+      kind: "open-code",
+      display_name: "OpenCode (pid 42)",
+      pid: 42,
+      cwd: "/repos/opencherry",
+      command_line: "opencode",
+      targets: { repos: [], groups: [] },
+      status: "idle",
+      ...overrides,
+    };
+  }
+
+  it("renders an idle status dot when the agent is idle", () => {
+    const view = render(() => (
+      <TargetAgentsPanel
+        title="Agents"
+        agents={[makeAgent({ status: "idle" })]}
+        empty="No agents"
+      />
+    ));
+    const dot = view.container.querySelector(".agent-status--idle");
+    expect(dot).not.toBeNull();
+  });
+
+  it("renders a generating status dot when the agent is generating", () => {
+    const view = render(() => (
+      <TargetAgentsPanel
+        title="Agents"
+        agents={[makeAgent({ status: "generating" })]}
+        empty="No agents"
+      />
+    ));
+    const dot = view.container.querySelector(".agent-status--generating");
+    expect(dot).not.toBeNull();
+  });
+
+  it("renders the correlated repo display name as a pill", () => {
+    const repo: RepoRef = {
+      id: "r1",
+      path: "/repos/x",
+      display_name: "myrepo",
+      kind: "repo",
+    };
+    const view = render(() => (
+      <TargetAgentsPanel
+        title="Agents"
+        agents={[makeAgent({ targets: { repos: [repo], groups: [] } })]}
+        empty="No agents"
+      />
+    ));
+    expect(view.getByText("myrepo")).toBeInTheDocument();
+  });
+
+  it("does not render a repo pill when the agent has no correlation", () => {
+    const view = render(() => (
+      <TargetAgentsPanel
+        title="Agents"
+        agents={[makeAgent({ targets: { repos: [], groups: [] } })]}
+        empty="No agents"
+      />
+    ));
+    expect(view.container.querySelector(".agents__repos")).toBeNull();
+  });
+
+  it("renders a subprocess indicator when parent_id is set", () => {
+    const view = render(() => (
+      <TargetAgentsPanel
+        title="Agents"
+        agents={[
+          makeAgent({ id: "pid-100", pid: 100 }),
+          makeAgent({
+            id: "pid-200",
+            pid: 200,
+            display_name: "Claude (chrome-native-host)",
+            parent_id: "pid-100",
+          }),
+        ]}
+        empty="No agents"
+      />
+    ));
+    expect(view.container.querySelector(".agents__subprocess")).not.toBeNull();
+  });
+
+  it("does not render a subprocess indicator for primary agents", () => {
+    const view = render(() => (
+      <TargetAgentsPanel
+        title="Agents"
+        agents={[makeAgent({ parent_id: null })]}
+        empty="No agents"
+      />
+    ));
+    expect(view.container.querySelector(".agents__subprocess")).toBeNull();
   });
 });
 
@@ -326,8 +513,8 @@ describe("App", () => {
     });
 
     render(() => <App />);
-    await screen.findByText("opencherry");
-    fireEvent.click(screen.getByText("opencherry"));
+    await screen.findByText("opencherry", { selector: ".repo-list__name" });
+    fireEvent.click(screen.getByText("opencherry", { selector: ".repo-list__name" }));
 
     const repoAgentsHeading = await screen.findByText("Agents in This Repo");
     const repoAgentsPanel = repoAgentsHeading.closest("section");

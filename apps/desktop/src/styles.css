@@ -334,6 +334,60 @@ body,
   white-space: nowrap;
 }
 
+.agent-status {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 0.4rem;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+
+.agent-status--idle {
+  background: #6e7681;
+}
+
+.agent-status--generating {
+  background: #58a6ff;
+  animation: agent-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes agent-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+.agents__repos {
+  display: inline-flex;
+  gap: 0.25rem;
+  flex-wrap: wrap;
+}
+
+.agents__repo {
+  font-family: ui-monospace, "JetBrains Mono", "Fira Code", monospace;
+  font-size: 0.7rem;
+  padding: 0.05rem 0.4rem;
+  background: rgba(88, 166, 255, 0.12);
+  border: 1px solid rgba(88, 166, 255, 0.25);
+  border-radius: 999px;
+  color: #58a6ff;
+}
+
+.agents__item--subprocess {
+  margin-left: 1.25rem;
+  opacity: 0.78;
+  border-left: 2px solid var(--card-border);
+}
+
+.agents__subprocess {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  font-style: italic;
+}
+
 /* ------- Misc ------- */
 
 .btn {
