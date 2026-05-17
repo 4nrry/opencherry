@@ -133,6 +133,49 @@ pnpm -C apps/desktop build
 pnpm -C apps/desktop test:e2e
 ```
 
+## Packaging & local install
+
+OpenCherry ships as a plain Debian package (`.deb`) — no sandbox, no store, no
+auto-updater. The app spawns external AI CLI agents and manages Git repos in
+arbitrary filesystem locations, so an unsandboxed package is the right fit;
+Flatpak/Snap are deferred (Snap with `confinement: classic` is the likely future
+route).
+
+### Build the `.deb`
+
+The build needs the same system dependencies and toolchain as the dev shell
+above. Then:
+
+```bash
+./scripts/build-deb.sh
+```
+
+This runs `pnpm -C apps/desktop tauri build --bundles deb` and prints the path
+of the generated package — `target/release/bundle/deb/OpenCherry_<version>_amd64.deb`
+(the Cargo workspace `target/` directory at the repo root). The first release
+build is slow (`lto = "thin"`, `codegen-units = 1`); later builds reuse the
+cache.
+
+### Install and run
+
+```bash
+sudo apt install ./target/release/bundle/deb/OpenCherry_0.0.1_amd64.deb
+```
+
+Use `apt install` with a path (not `dpkg -i`) so runtime dependencies resolve
+automatically. Then launch **OpenCherry** from the application menu, or run the
+installed binary at `/usr/bin/opencherry-desktop`.
+
+### Update and uninstall
+
+There is no auto-update. To update, bump `version` in
+`apps/desktop/src-tauri/tauri.conf.json`, rebuild, and reinstall the new `.deb`
+over the old one. To remove:
+
+```bash
+sudo apt remove open-cherry
+```
+
 ## Testing
 
 The current codebase includes backend and frontend automated coverage for the
