@@ -1,8 +1,7 @@
 :root {
   color-scheme: light dark;
-  font-family: system-ui, -apple-system, "Segoe UI", "Cantarell", "Ubuntu",
-    sans-serif;
-  font-size: 14px;
+  font-family: var(--font-ui);
+  font-size: var(--font-ui-size);
   line-height: 1.5;
   color: var(--color-text);
   background: var(--color-bg-window);
@@ -62,7 +61,10 @@
   --font-size-l:    1rem;
   --font-size-xl:   1.5rem;
   --font-size-xxl:  2rem;
+  --font-ui: system-ui, -apple-system, "Segoe UI", "Cantarell", "Ubuntu", sans-serif;
+  --font-ui-size: 14px;
   --font-mono: ui-monospace, "JetBrains Mono", "Fira Code", monospace;
+  --font-mono-size: 13px;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -247,8 +249,8 @@ body,
 
 .repo-view__path {
   opacity: 0.6;
-  font-size: var(--font-size-m);
   font-family: var(--font-mono);
+  font-size: var(--font-mono-size);
 }
 
 .status-grid {
@@ -280,7 +282,7 @@ body,
 
 .card__value--mono {
   font-family: var(--font-mono);
-  font-size: var(--font-size-base);
+  font-size: var(--font-mono-size);
 }
 
 .card--warn .card__value {
@@ -388,6 +390,7 @@ body,
 
 .agents__cwd {
   font-family: var(--font-mono);
+  font-size: var(--font-mono-size);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -425,7 +428,7 @@ body,
 
 .agents__repo {
   font-family: var(--font-mono);
-  font-size: 0.7rem;
+  font-size: var(--font-mono-size);
   padding: var(--space-xxxs) var(--space-xxs);
   background: rgba(88, 166, 255, 0.12);
   border: 1px solid rgba(88, 166, 255, 0.25);
@@ -679,7 +682,7 @@ body,
   overflow: auto;
   padding: var(--space-xs);
   font-family: var(--font-mono);
-  font-size: var(--font-size-s);
+  font-size: var(--font-mono-size);
   line-height: 1.45;
   white-space: pre-wrap;
 }
@@ -720,7 +723,7 @@ body,
 .confirm-dialog__path,
 .confirm-dialog__file-list {
   font-family: var(--font-mono);
-  font-size: var(--font-size-s);
+  font-size: var(--font-mono-size);
   color: var(--color-text-muted);
 }
 
