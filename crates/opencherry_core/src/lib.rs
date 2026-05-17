@@ -156,3 +156,72 @@ pub enum CoreError {
     #[error("io: {0}")]
     Io(String),
 }
+
+// ---------------------------------------------------------------------------
+// Theme + font preferences types
+// ---------------------------------------------------------------------------
+
+use std::collections::BTreeMap;
+
+/// Which colour scheme the user prefers.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ColorScheme {
+    Light,
+    Dark,
+    System,
+}
+
+/// A single font preference (family stack + size).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FontPref {
+    pub family: String,
+    pub size_px: u16,
+}
+
+/// Persisted user preferences for theme and typography.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Preferences {
+    pub theme_id: String,
+    pub color_scheme: ColorScheme,
+    pub ui_font: FontPref,
+    pub mono_font: FontPref,
+}
+
+impl Default for Preferences {
+    fn default() -> Self {
+        Self {
+            theme_id: "opencherry-default".to_string(),
+            color_scheme: ColorScheme::System,
+            ui_font: FontPref {
+                family:
+                    r#"system-ui, -apple-system, "Segoe UI", "Cantarell", "Ubuntu", sans-serif"#
+                        .to_string(),
+                size_px: 14,
+            },
+            mono_font: FontPref {
+                family: r#"ui-monospace, "JetBrains Mono", "Fira Code", monospace"#.to_string(),
+                size_px: 13,
+            },
+        }
+    }
+}
+
+/// Light and dark colour token maps for a theme.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThemeModes {
+    pub light: BTreeMap<String, String>,
+    pub dark: BTreeMap<String, String>,
+}
+
+/// A custom colour theme importable by the user.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Theme {
+    pub id: String,
+    pub name: String,
+    pub modes: ThemeModes,
+}

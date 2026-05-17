@@ -5,8 +5,8 @@
 
 use opencherry_agents::DetectedAgent;
 use opencherry_core::{
-    CommitResult, RepoDiff, RepoGroupSnapshot, RepoId, RepoRef, RepoStatus, RepoActionResult,
-    TrackedTargetKind,
+    CommitResult, Preferences, RepoActionResult, RepoDiff, RepoGroupSnapshot, RepoId, RepoRef,
+    RepoStatus, Theme, TrackedTargetKind,
 };
 use opencherry_persistence as persist;
 use serde::Serialize;
@@ -40,7 +40,10 @@ fn tracked_target_kind(path: &Path) -> Result<TrackedTargetKind, String> {
     } else if path.is_dir() {
         Ok(TrackedTargetKind::Group)
     } else {
-        Err(format!("path does not exist or is unsupported: {}", path.display()))
+        Err(format!(
+            "path does not exist or is unsupported: {}",
+            path.display()
+        ))
     }
 }
 
@@ -120,6 +123,48 @@ fn sync_repo_changes(path: String) -> Result<RepoActionResult, String> {
     opencherry_repo::sync_changes(Path::new(&path)).map_err(|e| e.to_string())
 }
 
+// ---------------------------------------------------------------------------
+// Theme + preferences commands
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+fn get_preferences(app: tauri::AppHandle) -> Result<Preferences, String> {
+    let dir = config_dir(&app)?;
+    persist::get_preferences(&dir).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn set_preferences(app: tauri::AppHandle, preferences: Preferences) -> Result<(), String> {
+    let dir = config_dir(&app)?;
+    persist::set_preferences(&dir, &preferences).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn list_custom_themes(app: tauri::AppHandle) -> Result<Vec<Theme>, String> {
+    let dir = config_dir(&app)?;
+    persist::list_custom_themes(&dir).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn import_theme_file(app: tauri::AppHandle, path: String) -> Result<Theme, String> {
+    let json = std::fs::read_to_string(&path)
+        .map_err(|e| format!("failed to read theme file '{path}': {e}"))?;
+    let theme: Theme = serde_json::from_str(&json).map_err(|e| {
+        format!("theme file '{path}' is not valid JSON or missing required fields: {e}")
+    })?;
+    let dir = config_dir(&app)?;
+    persist::insert_custom_theme(&dir, &theme).map_err(|e| e.to_string())?;
+    Ok(theme)
+}
+
+#[tauri::command]
+fn remove_custom_theme(app: tauri::AppHandle, id: String) -> Result<bool, String> {
+    let dir = config_dir(&app)?;
+    persist::remove_custom_theme(&dir, &id).map_err(|e| e.to_string())
+}
+
+// ---------------------------------------------------------------------------
+
 #[tauri::command]
 fn list_agents(app: tauri::AppHandle) -> Result<Vec<DetectedAgent>, String> {
     let dir = config_dir(&app)?;
@@ -134,8 +179,7 @@ fn list_agents(app: tauri::AppHandle) -> Result<Vec<DetectedAgent>, String> {
 pub fn run() {
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
         .init();
 
@@ -163,6 +207,11 @@ pub fn run() {
             publish_repo_branch,
             sync_repo_changes,
             list_agents,
+            get_preferences,
+            set_preferences,
+            list_custom_themes,
+            import_theme_file,
+            remove_custom_theme,
         ])
         .setup(|app| {
             // Eagerly create config dir so first save doesn't race.

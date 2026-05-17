@@ -3,7 +3,7 @@
 //! SQLite-backed storage in the platform app config dir. A one-time import
 //! from the Sprint 1 `repos.json` keeps local development data intact.
 
-use opencherry_core::{RepoId, RepoRef, TrackedTargetKind};
+use opencherry_core::{Preferences, RepoId, RepoRef, Theme, TrackedTargetKind};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -60,6 +60,18 @@ fn migrate(conn: &Connection) -> anyhow::Result<()> {
         BEGIN
             UPDATE repos SET updated_at = CURRENT_TIMESTAMP WHERE id = OLD.id;
         END;
+
+        CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY NOT NULL,
+            value TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS custom_themes (
+            id TEXT PRIMARY KEY NOT NULL,
+            name TEXT NOT NULL,
+            json TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
         "#,
     )?;
 
@@ -141,7 +153,11 @@ pub fn list_repos(config_dir: &Path) -> anyhow::Result<Vec<RepoRef>> {
 
 /// Add a tracked target by canonical path. Idempotent: if a target with the
 /// same id already exists, returns the existing entry without touching disk.
-pub fn add_repo(config_dir: &Path, path: &Path, kind: TrackedTargetKind) -> anyhow::Result<RepoRef> {
+pub fn add_repo(
+    config_dir: &Path,
+    path: &Path,
+    kind: TrackedTargetKind,
+) -> anyhow::Result<RepoRef> {
     let canonical = path.canonicalize()?;
     let id = RepoId::from_path(&canonical);
     let display_name = canonical
@@ -190,6 +206,96 @@ fn get_repo(conn: &Connection, id: &RepoId) -> anyhow::Result<Option<RepoRef>> {
     .optional()
     .map_err(Into::into)
 }
+
+// ---------------------------------------------------------------------------
+// Preferences
+// ---------------------------------------------------------------------------
+
+const PREFERENCES_KEY: &str = "preferences";
+
+/// Read the persisted user preferences. Returns `Preferences::default()` when
+/// no value has been saved yet.
+pub fn get_preferences(config_dir: &Path) -> anyhow::Result<Preferences> {
+    let conn = open(config_dir)?;
+    let result: Option<String> = conn
+        .query_row(
+            "SELECT value FROM settings WHERE key = ?1",
+            params![PREFERENCES_KEY],
+            |row| row.get(0),
+        )
+        .optional()?;
+
+    match result {
+        Some(json) => Ok(serde_json::from_str(&json)?),
+        None => Ok(Preferences::default()),
+    }
+}
+
+/// Persist user preferences, overwriting any previously saved value.
+pub fn set_preferences(config_dir: &Path, prefs: &Preferences) -> anyhow::Result<()> {
+    let conn = open(config_dir)?;
+    let json = serde_json::to_string(prefs)?;
+    conn.execute(
+        r#"
+        INSERT INTO settings (key, value)
+        VALUES (?1, ?2)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+        "#,
+        params![PREFERENCES_KEY, json],
+    )?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Custom themes
+// ---------------------------------------------------------------------------
+
+/// Return all custom themes stored by the user.
+pub fn list_custom_themes(config_dir: &Path) -> anyhow::Result<Vec<Theme>> {
+    let conn = open(config_dir)?;
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT json
+        FROM custom_themes
+        ORDER BY created_at, id
+        "#,
+    )?;
+    let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+
+    let mut themes = Vec::new();
+    for row in rows {
+        let json = row?;
+        let theme: Theme = serde_json::from_str(&json)?;
+        themes.push(theme);
+    }
+    Ok(themes)
+}
+
+/// Insert or replace a custom theme. The full `Theme` value is serialised into
+/// the `json` column so the caller can reconstruct it without extra queries.
+pub fn insert_custom_theme(config_dir: &Path, theme: &Theme) -> anyhow::Result<()> {
+    let conn = open(config_dir)?;
+    let json = serde_json::to_string(theme)?;
+    conn.execute(
+        r#"
+        INSERT OR REPLACE INTO custom_themes (id, name, json)
+        VALUES (?1, ?2, ?3)
+        "#,
+        params![theme.id, theme.name, json],
+    )?;
+    Ok(())
+}
+
+/// Delete a custom theme by id. Returns `true` if a row was deleted.
+pub fn remove_custom_theme(config_dir: &Path, id: &str) -> anyhow::Result<bool> {
+    let conn = open(config_dir)?;
+    let changed = conn.execute("DELETE FROM custom_themes WHERE id = ?1", params![id])?;
+    Ok(changed > 0)
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 fn kind_to_str(kind: &TrackedTargetKind) -> &'static str {
     match kind {
@@ -395,6 +501,156 @@ mod tests {
         assert!(repos.is_empty());
     }
 
+    // -----------------------------------------------------------------------
+    // Preferences tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn get_preferences_returns_default_when_absent() {
+        let config_dir = TestDir::new("prefs-default");
+        let prefs = get_preferences(config_dir.path()).unwrap();
+        let expected = Preferences::default();
+        assert_eq!(prefs.theme_id, expected.theme_id);
+        assert_eq!(prefs.color_scheme, expected.color_scheme);
+        assert_eq!(prefs.ui_font, expected.ui_font);
+        assert_eq!(prefs.mono_font, expected.mono_font);
+    }
+
+    #[test]
+    fn set_and_get_preferences_round_trips() {
+        use opencherry_core::{ColorScheme, FontPref};
+        let config_dir = TestDir::new("prefs-round-trip");
+
+        let custom = Preferences {
+            theme_id: "my-theme".to_string(),
+            color_scheme: ColorScheme::Dark,
+            ui_font: FontPref {
+                family: "Inter".to_string(),
+                size_px: 16,
+            },
+            mono_font: FontPref {
+                family: "JetBrains Mono".to_string(),
+                size_px: 14,
+            },
+        };
+
+        set_preferences(config_dir.path(), &custom).unwrap();
+        let retrieved = get_preferences(config_dir.path()).unwrap();
+
+        assert_eq!(retrieved.theme_id, custom.theme_id);
+        assert_eq!(retrieved.color_scheme, custom.color_scheme);
+        assert_eq!(retrieved.ui_font, custom.ui_font);
+        assert_eq!(retrieved.mono_font, custom.mono_font);
+    }
+
+    #[test]
+    fn set_preferences_overwrites_previous_value() {
+        use opencherry_core::ColorScheme;
+        let config_dir = TestDir::new("prefs-overwrite");
+
+        let first = Preferences {
+            theme_id: "theme-a".to_string(),
+            color_scheme: ColorScheme::Light,
+            ..Preferences::default()
+        };
+        set_preferences(config_dir.path(), &first).unwrap();
+
+        let second = Preferences {
+            theme_id: "theme-b".to_string(),
+            color_scheme: ColorScheme::Dark,
+            ..Preferences::default()
+        };
+        set_preferences(config_dir.path(), &second).unwrap();
+
+        let result = get_preferences(config_dir.path()).unwrap();
+        assert_eq!(result.theme_id, "theme-b");
+        assert_eq!(result.color_scheme, ColorScheme::Dark);
+    }
+
+    // -----------------------------------------------------------------------
+    // Custom theme tests
+    // -----------------------------------------------------------------------
+
+    fn sample_theme(id: &str, name: &str) -> Theme {
+        use opencherry_core::ThemeModes;
+        use std::collections::BTreeMap;
+        Theme {
+            id: id.to_string(),
+            name: name.to_string(),
+            modes: ThemeModes {
+                light: BTreeMap::from([
+                    ("--bg".to_string(), "#ffffff".to_string()),
+                    ("--fg".to_string(), "#000000".to_string()),
+                ]),
+                dark: BTreeMap::from([
+                    ("--bg".to_string(), "#000000".to_string()),
+                    ("--fg".to_string(), "#ffffff".to_string()),
+                ]),
+            },
+        }
+    }
+
+    #[test]
+    fn insert_and_list_custom_themes() {
+        let config_dir = TestDir::new("themes-list");
+        let theme_a = sample_theme("alpha", "Alpha Theme");
+        let theme_b = sample_theme("beta", "Beta Theme");
+
+        insert_custom_theme(config_dir.path(), &theme_a).unwrap();
+        insert_custom_theme(config_dir.path(), &theme_b).unwrap();
+
+        let themes = list_custom_themes(config_dir.path()).unwrap();
+        assert_eq!(themes.len(), 2);
+        assert!(themes
+            .iter()
+            .any(|t| t.id == "alpha" && t.name == "Alpha Theme"));
+        assert!(themes
+            .iter()
+            .any(|t| t.id == "beta" && t.name == "Beta Theme"));
+    }
+
+    #[test]
+    fn list_custom_themes_empty_when_none_inserted() {
+        let config_dir = TestDir::new("themes-empty");
+        let themes = list_custom_themes(config_dir.path()).unwrap();
+        assert!(themes.is_empty());
+    }
+
+    #[test]
+    fn insert_custom_theme_replaces_on_duplicate_id() {
+        let config_dir = TestDir::new("themes-replace");
+
+        let original = sample_theme("dup-id", "Original Name");
+        insert_custom_theme(config_dir.path(), &original).unwrap();
+
+        let replacement = sample_theme("dup-id", "Replaced Name");
+        insert_custom_theme(config_dir.path(), &replacement).unwrap();
+
+        let themes = list_custom_themes(config_dir.path()).unwrap();
+        assert_eq!(themes.len(), 1);
+        assert_eq!(themes[0].name, "Replaced Name");
+    }
+
+    #[test]
+    fn remove_custom_theme_returns_true_when_deleted() {
+        let config_dir = TestDir::new("themes-remove-exists");
+        let theme = sample_theme("remove-me", "To Remove");
+        insert_custom_theme(config_dir.path(), &theme).unwrap();
+
+        let removed = remove_custom_theme(config_dir.path(), "remove-me").unwrap();
+        assert!(removed);
+
+        let themes = list_custom_themes(config_dir.path()).unwrap();
+        assert!(themes.is_empty());
+    }
+
+    #[test]
+    fn remove_custom_theme_returns_false_when_not_found() {
+        let config_dir = TestDir::new("themes-remove-missing");
+        let removed = remove_custom_theme(config_dir.path(), "ghost-id").unwrap();
+        assert!(!removed);
+    }
+
     #[test]
     fn imports_legacy_json_without_kind_as_repo() {
         let config_dir = TestDir::new("persistence-legacy-missing-kind-config");
@@ -449,7 +705,11 @@ mod tests {
         .unwrap();
         db.execute(
             "INSERT INTO repos (id, path, display_name) VALUES (?1, ?2, ?3)",
-            params!["legacy-repo", legacy_repo_path.to_string_lossy().to_string(), "legacy-repo"],
+            params![
+                "legacy-repo",
+                legacy_repo_path.to_string_lossy().to_string(),
+                "legacy-repo"
+            ],
         )
         .unwrap();
         drop(db);
@@ -459,12 +719,21 @@ mod tests {
         assert_eq!(repos[0].display_name, "legacy-repo");
         assert_eq!(repos[0].kind, TrackedTargetKind::Repo);
 
-        let added_group = add_repo(config_dir.path(), &group_dir, TrackedTargetKind::Group).unwrap();
+        let added_group =
+            add_repo(config_dir.path(), &group_dir, TrackedTargetKind::Group).unwrap();
         assert_eq!(added_group.kind, TrackedTargetKind::Group);
 
         let repos = list_repos(config_dir.path()).unwrap();
         assert_eq!(repos.len(), 2);
-        assert!(repos.iter().any(|repo| repo.display_name == "legacy-repo" && repo.kind == TrackedTargetKind::Repo));
-        assert!(repos.iter().any(|repo| repo.display_name == "workspace-group" && repo.kind == TrackedTargetKind::Group));
+        assert!(
+            repos
+                .iter()
+                .any(|repo| repo.display_name == "legacy-repo"
+                    && repo.kind == TrackedTargetKind::Repo)
+        );
+        assert!(repos
+            .iter()
+            .any(|repo| repo.display_name == "workspace-group"
+                && repo.kind == TrackedTargetKind::Group));
     }
 }
