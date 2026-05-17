@@ -804,15 +804,6 @@ body,
 }
 
 .settings-dialog__close {
-  appearance: none;
-  background: transparent;
-  border: none;
-  color: inherit;
-  font-size: 1.25rem;
-  line-height: 1;
-  cursor: pointer;
-  padding: var(--space-xxxs) var(--space-xxs);
-  border-radius: var(--radius-s);
   opacity: 0.6;
 }
 

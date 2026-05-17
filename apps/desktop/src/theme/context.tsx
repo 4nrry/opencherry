@@ -100,7 +100,9 @@ export const ThemeProvider: ParentComponent = (props) => {
       uiFont: { ...preferences.uiFont },
       monoFont: { ...preferences.monoFont },
     };
-    void invoke<void>("set_preferences", { preferences: snap });
+    void invoke<void>("set_preferences", { preferences: snap }).catch((e) =>
+      console.error("[ThemeProvider] set_preferences failed:", e),
+    );
   }
 
   // ---------------------------------------------------------------------------
@@ -184,11 +186,16 @@ export const ThemeProvider: ParentComponent = (props) => {
   // Remove custom theme
   // ---------------------------------------------------------------------------
   async function removeCustomTheme(id: string): Promise<void> {
-    await invoke<boolean>("remove_custom_theme", { id });
-    const custom = await invoke<Theme[]>("list_custom_themes");
-    setThemes(buildThemeList(custom));
-    if (preferences.themeId === id) {
-      setTheme(DEFAULT_THEME_ID);
+    try {
+      await invoke<boolean>("remove_custom_theme", { id });
+      const custom = await invoke<Theme[]>("list_custom_themes");
+      setThemes(buildThemeList(custom));
+      if (preferences.themeId === id) {
+        setTheme(DEFAULT_THEME_ID);
+      }
+    } catch (e) {
+      console.error("[ThemeProvider] removeCustomTheme failed:", e);
+      throw e;
     }
   }
 

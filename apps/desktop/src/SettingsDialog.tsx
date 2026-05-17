@@ -95,32 +95,38 @@ export function SettingsDialog(props: {
   const customThemes = () =>
     theme.themes().filter((t) => !BUILTIN_IDS.has(t.id));
 
+  let closeRef: HTMLButtonElement | undefined;
+
   return (
     <Show when={props.open}>
-      <div
-        class="settings-dialog__overlay"
-        onClick={() => props.onClose()}
-        role="presentation"
-      >
+      {(_open) => {
+        queueMicrotask(() => closeRef?.focus());
+        return (
         <div
-          class="settings-dialog__panel"
-          role="dialog"
-          aria-modal="true"
-          aria-label="Settings"
-          onClick={(e) => e.stopPropagation()}
+          class="settings-dialog__overlay"
+          onClick={() => props.onClose()}
+          role="presentation"
         >
-          {/* Header */}
-          <div class="settings-dialog__header">
-            <h2 class="settings-dialog__title">Settings</h2>
-            <button
-              type="button"
-              class="btn btn--small settings-dialog__close"
-              aria-label="Close settings"
-              onClick={() => props.onClose()}
-            >
-              ×
-            </button>
-          </div>
+          <div
+            class="settings-dialog__panel"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="settings-dialog-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div class="settings-dialog__header">
+              <h2 id="settings-dialog-title" class="settings-dialog__title">Settings</h2>
+              <button
+                type="button"
+                class="btn btn--small settings-dialog__close"
+                ref={(el) => (closeRef = el)}
+                aria-label="Close settings"
+                onClick={() => props.onClose()}
+              >
+                ×
+              </button>
+            </div>
 
           <div class="settings-dialog__body">
             {/* ----------------------------------------------------------------
@@ -131,8 +137,11 @@ export function SettingsDialog(props: {
               <div class="settings-dialog__theme-grid">
                 <For each={theme.themes()}>
                   {(t) => {
-                    const scheme = theme.effectiveScheme();
-                    const tokens = t.modes[scheme] ?? {};
+                    const swatchColors = () => {
+                      const s = theme.effectiveScheme();
+                      const map = t.modes[s] ?? {};
+                      return SWATCH_TOKENS.map((tk) => map[tk] ?? "transparent");
+                    };
                     const isActive = () => theme.activeTheme().id === t.id;
                     return (
                       <button
@@ -146,13 +155,11 @@ export function SettingsDialog(props: {
                         aria-label={`Select theme ${t.name}`}
                       >
                         <div class="settings-dialog__swatches">
-                          <For each={SWATCH_TOKENS}>
-                            {(token) => (
+                          <For each={swatchColors()}>
+                            {(color) => (
                               <span
                                 class="settings-dialog__swatch"
-                                style={{
-                                  background: tokens[token] ?? "transparent",
-                                }}
+                                style={{ background: color }}
                                 aria-hidden="true"
                               />
                             )}
@@ -322,8 +329,10 @@ export function SettingsDialog(props: {
               </Show>
             </section>
           </div>
+          </div>
         </div>
-      </div>
+        );
+      }}
     </Show>
   );
 }

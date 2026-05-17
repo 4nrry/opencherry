@@ -3,6 +3,7 @@ import { fireEvent, render, screen } from "@solidjs/testing-library";
 import { SettingsDialog } from "./SettingsDialog";
 import type { Preferences, Theme } from "./theme/types";
 import { createStore } from "solid-js/store";
+import { createSignal } from "solid-js";
 
 // ---------------------------------------------------------------------------
 // Mock the theme context so the dialog can be tested in isolation
@@ -339,5 +340,53 @@ describe("SettingsDialog", () => {
     render(() => <SettingsDialog open={true} onClose={onClose} />);
     fireEvent.click(screen.getByLabelText("Close settings"));
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  // -------- Swatch reactivity (Fix 1) --------
+
+  it("swatch colors update reactively when effectiveScheme changes", async () => {
+    // Use a reactive signal so we can change the scheme while the dialog is open.
+    const [scheme, setScheme] = createSignal<"light" | "dark">("light");
+
+    const [preferences] = createStore<Preferences>(DEFAULT_PREFS);
+    const reactiveThemeMock = {
+      preferences,
+      themes: () => [BUILTIN_THEME],
+      activeTheme: () => BUILTIN_THEME,
+      effectiveScheme: scheme,
+      setTheme: mockSetTheme,
+      setColorScheme: mockSetColorScheme,
+      setUiFont: mockSetUiFont,
+      setMonoFont: mockSetMonoFont,
+      previewTheme: mockPreviewTheme,
+      importTheme: mockImportTheme,
+      removeCustomTheme: mockRemoveCustomTheme,
+    };
+    currentMock = reactiveThemeMock;
+
+    const { container } = render(() => (
+      <SettingsDialog open={true} onClose={() => {}} />
+    ));
+
+    // Capture the bg-window swatch style in light mode.
+    const bgSwatchLight = container.querySelectorAll(
+      ".settings-dialog__swatch",
+    )[0].getAttribute("style");
+
+    // Switch to dark mode reactively.
+    setScheme("dark");
+
+    // Allow SolidJS to flush its reactive updates (synchronous in its scheduler).
+    await Promise.resolve();
+
+    // The swatch style should now reflect the dark-mode color — different from light.
+    const bgSwatchDark = container.querySelectorAll(
+      ".settings-dialog__swatch",
+    )[0].getAttribute("style");
+
+    // Light bg-window (#fafafa) and dark bg-window (#1c1c1e) are different colors.
+    expect(bgSwatchDark).not.toBe(bgSwatchLight);
+    // Dark mode bg-window should NOT contain the light hex color's rgb equivalent.
+    expect(bgSwatchDark).not.toContain("rgb(250, 250, 250)");
   });
 });
