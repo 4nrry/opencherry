@@ -127,6 +127,21 @@ fn sync_repo_changes(path: String) -> Result<RepoActionResult, String> {
 // Theme + preferences commands
 // ---------------------------------------------------------------------------
 
+/// IDs that are reserved for built-in themes shipped with the application.
+/// A custom theme whose id matches one of these is rejected at import time
+/// because the built-in would shadow it, making it unreachable and
+/// unremovable through the UI.
+const BUILTIN_THEME_IDS: &[&str] = &[
+    "opencherry-default",
+    "dracula",
+    "nord",
+    "gruvbox",
+    "catppuccin",
+    "tokyo-night",
+    "solarized",
+    "one-dark",
+];
+
 #[tauri::command]
 fn get_preferences(app: tauri::AppHandle) -> Result<Preferences, String> {
     let dir = config_dir(&app)?;
@@ -152,6 +167,12 @@ fn import_theme_file(app: tauri::AppHandle, path: String) -> Result<Theme, Strin
     let theme: Theme = serde_json::from_str(&json).map_err(|e| {
         format!("theme file '{path}' is not valid JSON or missing required fields: {e}")
     })?;
+    if BUILTIN_THEME_IDS.contains(&theme.id.as_str()) {
+        return Err(format!(
+            "A theme with id '{}' is built in; choose a different id.",
+            theme.id
+        ));
+    }
     let dir = config_dir(&app)?;
     persist::insert_custom_theme(&dir, &theme).map_err(|e| e.to_string())?;
     Ok(theme)

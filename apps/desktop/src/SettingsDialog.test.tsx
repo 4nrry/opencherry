@@ -253,12 +253,42 @@ describe("SettingsDialog", () => {
   // -------- Import button --------
 
   it("clicking Import theme calls importTheme and clears error on success", async () => {
-    mockImportTheme.mockResolvedValue({ ok: true, theme: CUSTOM_THEME });
+    mockImportTheme.mockResolvedValue({ ok: true, theme: CUSTOM_THEME, warnings: [] });
     render(() => <SettingsDialog open={true} onClose={() => {}} />);
     fireEvent.click(screen.getByText("Import theme…"));
     await flushMicrotasks();
     await flushMicrotasks();
     expect(mockImportTheme).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows a warning banner when importTheme returns ok:true with non-empty warnings", async () => {
+    mockImportTheme.mockResolvedValue({
+      ok: true,
+      theme: CUSTOM_THEME,
+      warnings: ["Theme \"my-custom\" is missing token \"--color-text\" in \"light\" mode; filled from fallback."],
+    });
+    render(() => <SettingsDialog open={true} onClose={() => {}} />);
+    fireEvent.click(screen.getByText("Import theme…"));
+    await flushMicrotasks();
+    await flushMicrotasks();
+    const banner = document.querySelector(".banner--warn");
+    expect(banner).toBeTruthy();
+    expect(banner!.textContent).toContain("missing token");
+  });
+
+  it("warning banner is dismissible", async () => {
+    mockImportTheme.mockResolvedValue({
+      ok: true,
+      theme: CUSTOM_THEME,
+      warnings: ["Some warning"],
+    });
+    render(() => <SettingsDialog open={true} onClose={() => {}} />);
+    fireEvent.click(screen.getByText("Import theme…"));
+    await flushMicrotasks();
+    await flushMicrotasks();
+    expect(document.querySelector(".banner--warn")).toBeTruthy();
+    fireEvent.click(screen.getByLabelText("Dismiss import warnings"));
+    expect(document.querySelector(".banner--warn")).toBeNull();
   });
 
   it("shows an error banner when importTheme returns ok:false", async () => {

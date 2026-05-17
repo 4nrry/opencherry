@@ -51,8 +51,14 @@ function makeTheme(id: string): Theme {
 const DEFAULT_PREFS: Preferences = {
   themeId: DEFAULT_THEME_ID,
   colorScheme: "light",
-  uiFont: { family: "sans-serif", sizePx: 14 },
-  monoFont: { family: "monospace", sizePx: 13 },
+  uiFont: {
+    family: 'system-ui, -apple-system, "Segoe UI", "Cantarell", "Ubuntu", sans-serif',
+    sizePx: 14,
+  },
+  monoFont: {
+    family: 'ui-monospace, "JetBrains Mono", "Fira Code", monospace',
+    sizePx: 13,
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -258,6 +264,8 @@ describe("ThemeProvider", () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.theme.id).toBe("custom-imported");
+      // warnings should always be present on a successful import (may be empty)
+      expect(Array.isArray(result.warnings)).toBe(true);
     }
 
     expect(invokeMock).toHaveBeenCalledWith("import_theme_file", { path: "/some/path/custom.json" });
@@ -266,6 +274,51 @@ describe("ThemeProvider", () => {
     await waitFor(() =>
       expect(capturedCtx!.themes().some((t) => t.id === "custom-imported")).toBe(true),
     );
+  });
+
+  it("importTheme returns warnings when the imported theme is missing tokens", async () => {
+    // A theme with empty mode maps — validateTheme will warn about every missing token.
+    const incompleteTheme: Theme = {
+      id: "incomplete-theme",
+      name: "Incomplete Theme",
+      modes: { light: {}, dark: {} },
+    };
+
+    let importDone = false;
+    invokeMock.mockImplementation((command: string) => {
+      switch (command) {
+        case "get_preferences":
+          return Promise.resolve(DEFAULT_PREFS);
+        case "list_custom_themes":
+          return Promise.resolve(importDone ? [incompleteTheme] : []);
+        case "set_preferences":
+          return Promise.resolve();
+        case "import_theme_file":
+          importDone = true;
+          return Promise.resolve(incompleteTheme);
+        default:
+          throw new Error(`Unexpected invoke: ${command}`);
+      }
+    });
+
+    openMock.mockResolvedValue("/some/path/incomplete.json");
+
+    render(() => (
+      <ThemeProvider>
+        <CaptureMountHelper />
+      </ThemeProvider>
+    ));
+
+    await waitFor(() => expect(capturedCtx!.preferences.themeId).toBe(DEFAULT_THEME_ID));
+
+    const result = await capturedCtx!.importTheme();
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.warnings.length).toBeGreaterThan(0);
+      // Each warning should mention the missing token and mode.
+      expect(result.warnings.some((w) => w.includes("missing token"))).toBe(true);
+    }
   });
 
   it("importTheme returns ok:false when the dialog is cancelled", async () => {

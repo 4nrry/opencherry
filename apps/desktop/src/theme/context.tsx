@@ -21,8 +21,14 @@ import { BUILTIN_THEMES, DEFAULT_THEME_ID } from "./builtin/index";
 const FALLBACK_PREFS: Preferences = {
   themeId: DEFAULT_THEME_ID,
   colorScheme: "system",
-  uiFont: { family: "sans-serif", sizePx: 14 },
-  monoFont: { family: "monospace", sizePx: 13 },
+  uiFont: {
+    family: 'system-ui, -apple-system, "Segoe UI", "Cantarell", "Ubuntu", sans-serif',
+    sizePx: 14,
+  },
+  monoFont: {
+    family: 'ui-monospace, "JetBrains Mono", "Fira Code", monospace',
+    sizePx: 13,
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -38,7 +44,7 @@ interface ThemeContextValue {
   setUiFont: (p: Partial<FontPref>) => void;
   setMonoFont: (p: Partial<FontPref>) => void;
   previewTheme: (id: string | null) => void;
-  importTheme: () => Promise<{ ok: true; theme: Theme } | { ok: false; error: string }>;
+  importTheme: () => Promise<{ ok: true; theme: Theme; warnings: string[] } | { ok: false; error: string }>;
   removeCustomTheme: (id: string) => Promise<void>;
 }
 
@@ -161,7 +167,7 @@ export const ThemeProvider: ParentComponent = (props) => {
   // Import
   // ---------------------------------------------------------------------------
   async function importTheme(): Promise<
-    { ok: true; theme: Theme } | { ok: false; error: string }
+    { ok: true; theme: Theme; warnings: string[] } | { ok: false; error: string }
   > {
     try {
       const picked = await open({
@@ -173,10 +179,11 @@ export const ThemeProvider: ParentComponent = (props) => {
         return { ok: false, error: "No file selected." };
       }
       const theme = await invoke<Theme>("import_theme_file", { path: picked });
+      const { warnings } = validateTheme(theme, defaultTheme());
       // Refresh the custom theme list from the backend.
       const custom = await invoke<Theme[]>("list_custom_themes");
       setThemes(buildThemeList(custom));
-      return { ok: true, theme };
+      return { ok: true, theme, warnings };
     } catch (e) {
       return { ok: false, error: String(e) };
     }

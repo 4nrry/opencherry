@@ -72,6 +72,7 @@ export function SettingsDialog(props: {
 }): JSX.Element {
   const theme = useTheme();
   const [importError, setImportError] = createSignal<string | null>(null);
+  const [importWarnings, setImportWarnings] = createSignal<string[]>([]);
 
   // Escape key handler
   onMount(() => {
@@ -86,9 +87,12 @@ export function SettingsDialog(props: {
 
   const handleImport = async () => {
     setImportError(null);
+    setImportWarnings([]);
     const result = await theme.importTheme();
     if (!result.ok) {
       setImportError(result.error);
+    } else if (result.warnings.length > 0) {
+      setImportWarnings(result.warnings);
     }
   };
 
@@ -298,6 +302,22 @@ export function SettingsDialog(props: {
                     {err()}
                   </div>
                 )}
+              </Show>
+              <Show when={importWarnings().length > 0}>
+                <div class="banner banner--warn" role="status">
+                  <For each={importWarnings()}>
+                    {(w) => <div>{w}</div>}
+                  </For>
+                  <button
+                    type="button"
+                    class="btn btn--tiny"
+                    style={{ "margin-top": "0.4rem" }}
+                    onClick={() => setImportWarnings([])}
+                    aria-label="Dismiss import warnings"
+                  >
+                    Dismiss
+                  </button>
+                </div>
               </Show>
               <Show
                 when={customThemes().length > 0}
