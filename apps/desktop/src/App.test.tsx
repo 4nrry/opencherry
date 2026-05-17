@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from "@solidjs/testing-lib
 import { createSignal, type Resource } from "solid-js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import App, { DiffGroup, DiffPanel, RepoPrimaryActionBar, TargetAgentsPanel } from "./App";
+import { ThemeProvider } from "./theme/context";
 import type { CommitResult, DetectedAgent, RepoDiff, RepoGroupSnapshot, RepoRef, RepoStatus } from "./types";
 
 const invokeMock = vi.fn();
@@ -41,6 +42,10 @@ function makeRepoDiff(overrides: Partial<RepoDiff> = {}): RepoDiff {
 function resourceOf<T>(value: T): Resource<T> {
   const [data] = createSignal(value);
   return data as Resource<T>;
+}
+
+function renderApp() {
+  return render(() => <ThemeProvider><App /></ThemeProvider>);
 }
 
 describe("RepoPrimaryActionBar", () => {
@@ -535,6 +540,17 @@ describe("App", () => {
         case "unregister_repo":
         case "register_repo":
           return Promise.resolve(undefined);
+        case "get_preferences":
+          return Promise.resolve({
+            themeId: "cherry-dark",
+            colorScheme: "system",
+            uiFont: { family: "sans-serif", sizePx: 14 },
+            monoFont: { family: "monospace", sizePx: 13 },
+          });
+        case "list_custom_themes":
+          return Promise.resolve([]);
+        case "set_preferences":
+          return Promise.resolve(undefined);
         default:
           throw new Error(`unexpected invoke ${command}`);
       }
@@ -542,7 +558,7 @@ describe("App", () => {
   });
 
   it("loads the repo view and handles commit UI states", async () => {
-    render(() => <App />);
+    renderApp();
 
     await screen.findByText("opencherry");
     fireEvent.click(screen.getByText("opencherry"));
@@ -612,12 +628,23 @@ describe("App", () => {
         case "unregister_repo":
         case "register_repo":
           return Promise.resolve(undefined);
+        case "get_preferences":
+          return Promise.resolve({
+            themeId: "cherry-dark",
+            colorScheme: "system",
+            uiFont: { family: "sans-serif", sizePx: 14 },
+            monoFont: { family: "monospace", sizePx: 13 },
+          });
+        case "list_custom_themes":
+          return Promise.resolve([]);
+        case "set_preferences":
+          return Promise.resolve(undefined);
         default:
           throw new Error(`unexpected invoke ${command}`);
       }
     });
 
-    render(() => <App />);
+    renderApp();
     await screen.findByText("opencherry", { selector: ".repo-list__name" });
     fireEvent.click(screen.getByText("opencherry", { selector: ".repo-list__name" }));
 
@@ -682,19 +709,30 @@ describe("App", () => {
         case "unregister_repo":
         case "register_repo":
           return Promise.resolve(undefined);
+        case "get_preferences":
+          return Promise.resolve({
+            themeId: "cherry-dark",
+            colorScheme: "system",
+            uiFont: { family: "sans-serif", sizePx: 14 },
+            monoFont: { family: "monospace", sizePx: 13 },
+          });
+        case "list_custom_themes":
+          return Promise.resolve([]);
+        case "set_preferences":
+          return Promise.resolve(undefined);
         default:
           throw new Error(`unexpected invoke ${command}`);
       }
     });
 
-    render(() => <App />);
+    renderApp();
 
     expect(await screen.findByText("1 agent outside tracked repos/groups.")).toBeInTheDocument();
     expect(screen.getAllByText("1").length).toBeGreaterThan(0);
   });
 
   it("renders a group view with aggregated child repo data", async () => {
-    render(() => <App />);
+    renderApp();
 
     await screen.findByText("[Group] acme");
     fireEvent.click(screen.getByText("[Group] acme"));
@@ -775,12 +813,23 @@ describe("App", () => {
         case "unregister_repo":
         case "register_repo":
           return Promise.resolve(undefined);
+        case "get_preferences":
+          return Promise.resolve({
+            themeId: "cherry-dark",
+            colorScheme: "system",
+            uiFont: { family: "sans-serif", sizePx: 14 },
+            monoFont: { family: "monospace", sizePx: 13 },
+          });
+        case "list_custom_themes":
+          return Promise.resolve([]);
+        case "set_preferences":
+          return Promise.resolve(undefined);
         default:
           throw new Error(`unexpected invoke ${command}`);
       }
     });
 
-    render(() => <App />);
+    renderApp();
     await screen.findByText("[Group] acme");
     fireEvent.click(screen.getByText("[Group] acme"));
     const repoFilterTabs = await screen.findByRole("tablist", { name: "Child repository filters" });
@@ -876,12 +925,23 @@ describe("App", () => {
         case "unregister_repo":
         case "register_repo":
           return Promise.resolve(undefined);
+        case "get_preferences":
+          return Promise.resolve({
+            themeId: "cherry-dark",
+            colorScheme: "system",
+            uiFont: { family: "sans-serif", sizePx: 14 },
+            monoFont: { family: "monospace", sizePx: 13 },
+          });
+        case "list_custom_themes":
+          return Promise.resolve([]);
+        case "set_preferences":
+          return Promise.resolve(undefined);
         default:
           throw new Error(`unexpected invoke ${command}`);
       }
     });
 
-    render(() => <App />);
+    renderApp();
     await screen.findByText("[Group] acme");
     fireEvent.click(screen.getByText("[Group] acme"));
 
@@ -971,12 +1031,23 @@ describe("App", () => {
         case "unregister_repo":
         case "register_repo":
           return Promise.resolve(undefined);
+        case "get_preferences":
+          return Promise.resolve({
+            themeId: "cherry-dark",
+            colorScheme: "system",
+            uiFont: { family: "sans-serif", sizePx: 14 },
+            monoFont: { family: "monospace", sizePx: 13 },
+          });
+        case "list_custom_themes":
+          return Promise.resolve([]);
+        case "set_preferences":
+          return Promise.resolve(undefined);
         default:
           throw new Error(`unexpected invoke ${command}`);
       }
     });
 
-    render(() => <App />);
+    renderApp();
     await screen.findByText("[Group] acme");
     fireEvent.click(screen.getByText("[Group] acme"));
     const agentFilterTabs = await screen.findByRole("tablist", { name: "Child repository agent filters" });
@@ -1040,12 +1111,23 @@ describe("App", () => {
         case "unregister_repo":
         case "register_repo":
           return Promise.resolve(undefined);
+        case "get_preferences":
+          return Promise.resolve({
+            themeId: "cherry-dark",
+            colorScheme: "system",
+            uiFont: { family: "sans-serif", sizePx: 14 },
+            monoFont: { family: "monospace", sizePx: 13 },
+          });
+        case "list_custom_themes":
+          return Promise.resolve([]);
+        case "set_preferences":
+          return Promise.resolve(undefined);
         default:
           throw new Error(`unexpected invoke ${command}`);
       }
     });
 
-    render(() => <App />);
+    renderApp();
     await screen.findByText("[Group] acme");
     fireEvent.click(screen.getByText("[Group] acme"));
 
@@ -1109,12 +1191,23 @@ describe("App", () => {
         case "discard_repo_files":
         case "unregister_repo":
           return Promise.resolve(undefined);
+        case "get_preferences":
+          return Promise.resolve({
+            themeId: "cherry-dark",
+            colorScheme: "system",
+            uiFont: { family: "sans-serif", sizePx: 14 },
+            monoFont: { family: "monospace", sizePx: 13 },
+          });
+        case "list_custom_themes":
+          return Promise.resolve([]);
+        case "set_preferences":
+          return Promise.resolve(undefined);
         default:
           throw new Error(`unexpected invoke ${command}`);
       }
     });
 
-    render(() => <App />);
+    renderApp();
     await screen.findByText("[Group] acme");
     fireEvent.click(screen.getByText("[Group] acme"));
 
@@ -1200,12 +1293,23 @@ describe("App", () => {
         case "discard_repo_files":
         case "unregister_repo":
           return Promise.resolve(undefined);
+        case "get_preferences":
+          return Promise.resolve({
+            themeId: "cherry-dark",
+            colorScheme: "system",
+            uiFont: { family: "sans-serif", sizePx: 14 },
+            monoFont: { family: "monospace", sizePx: 13 },
+          });
+        case "list_custom_themes":
+          return Promise.resolve([]);
+        case "set_preferences":
+          return Promise.resolve(undefined);
         default:
           throw new Error(`unexpected invoke ${command}`);
       }
     });
 
-    render(() => <App />);
+    renderApp();
     await screen.findByText("[Group] acme");
     fireEvent.click(screen.getByText("[Group] acme"));
 
@@ -1294,12 +1398,23 @@ describe("App", () => {
         case "discard_repo_files":
         case "unregister_repo":
           return Promise.resolve(undefined);
+        case "get_preferences":
+          return Promise.resolve({
+            themeId: "cherry-dark",
+            colorScheme: "system",
+            uiFont: { family: "sans-serif", sizePx: 14 },
+            monoFont: { family: "monospace", sizePx: 13 },
+          });
+        case "list_custom_themes":
+          return Promise.resolve([]);
+        case "set_preferences":
+          return Promise.resolve(undefined);
         default:
           throw new Error(`unexpected invoke ${command}`);
       }
     });
 
-    render(() => <App />);
+    renderApp();
     await screen.findByText("[Group] acme");
     fireEvent.click(screen.getByText("[Group] acme"));
 
@@ -1318,5 +1433,17 @@ describe("App", () => {
       path: "/repos/acme/backend",
     });
     expect(await screen.findByText("frontend")).toBeInTheDocument();
+  });
+
+  it("clicking the settings button opens the settings dialog", async () => {
+    renderApp();
+
+    await screen.findByText("opencherry");
+
+    expect(screen.queryByRole("dialog", { name: "Settings" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTitle("Open settings"));
+
+    expect(await screen.findByRole("dialog", { name: "Settings" })).toBeInTheDocument();
   });
 });

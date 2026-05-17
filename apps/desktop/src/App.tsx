@@ -21,6 +21,7 @@ import type {
   RepoStatus,
 } from "./types";
 import { ConfirmDialog, type ConfirmRequest } from "./ConfirmDialog";
+import { SettingsDialog } from "./SettingsDialog";
 
 type GroupRepoFilter = "all" | "untracked" | "tracked" | "dirty";
 type GroupAgentFilter = "all" | "with-agents" | "without-agents";
@@ -109,6 +110,7 @@ export default function App() {
   const [error, setError] = createSignal<string | null>(null);
   const [confirmRequest, setConfirmRequest] =
     createSignal<ConfirmRequest | null>(null);
+  const [settingsOpen, setSettingsOpen] = createSignal<boolean>(false);
   const requestConfirm = (req: ConfirmRequest) => setConfirmRequest(req);
   const trackedRepoPaths = () =>
     new Set((repos() ?? []).filter((repo) => repo.kind === "repo").map((repo) => repo.path));
@@ -164,6 +166,9 @@ export default function App() {
           <h2>Repositories</h2>
           <button class="btn btn--small" onClick={addRepo} title="Add a repository">
             +
+          </button>
+          <button class="btn btn--small" onClick={() => setSettingsOpen(true)} title="Open settings">
+            ⚙
           </button>
         </div>
         <Show
@@ -262,6 +267,10 @@ export default function App() {
     <ConfirmDialog
       request={confirmRequest()}
       onClose={() => setConfirmRequest(null)}
+    />
+    <SettingsDialog
+      open={settingsOpen()}
+      onClose={() => setSettingsOpen(false)}
     />
     </>
   );
