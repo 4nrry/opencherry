@@ -159,12 +159,15 @@ cache.
 ### Install and run
 
 ```bash
-sudo apt install ./target/release/bundle/deb/OpenCherry_0.0.1_amd64.deb
+sudo apt install "$(pwd)/target/release/bundle/deb/OpenCherry_0.0.1_amd64.deb"
 ```
 
 Use `apt install` with a path (not `dpkg -i`) so runtime dependencies resolve
-automatically. Then launch **OpenCherry** from the application menu, or run the
-installed binary at `/usr/bin/opencherry-desktop`.
+automatically. Pass an **absolute** path — `apt` rejects a relative path with
+`Unsupported file ... given on commandline` when it can't resolve it from the
+current directory (`build-deb.sh` prints the absolute install command for you).
+Then launch **OpenCherry** from the application menu, or run the installed
+binary at `/usr/bin/opencherry-desktop`.
 
 ### Update and uninstall
 
