@@ -1,0 +1,52 @@
+{
+  "id": "nord",
+  "name": "Nord",
+  "modes": {
+    "light": {
+      "--color-component-base": "#eceff4",
+      "--color-component-hover": "rgba(59, 66, 82, 0.08)",
+      "--color-component-pressed": "rgba(59, 66, 82, 0.14)",
+      "--color-component-selected-bg": "rgba(136, 192, 208, 0.25)",
+      "--color-component-selected-fg": "#2e7d96",
+      "--color-component-focus": "#5e81ac",
+      "--color-component-disabled": "rgba(59, 66, 82, 0.35)",
+      "--color-component-border": "rgba(59, 66, 82, 0.12)",
+      "--color-bg-window": "#eceff4",
+      "--color-bg-sidebar": "#e5e9f0",
+      "--color-bg-card": "#ffffff",
+      "--color-text": "#2e3440",
+      "--color-text-muted": "rgba(46, 52, 64, 0.55)",
+      "--color-warn-fg": "#b45309",
+      "--color-warn-bg": "rgba(235, 203, 139, 0.30)",
+      "--color-ok-fg": "#047857",
+      "--color-ok-bg": "rgba(163, 190, 140, 0.25)",
+      "--color-danger-fg": "#991b1b",
+      "--color-danger-bg": "rgba(191, 97, 106, 0.18)",
+      "--color-agent-active": "#5e81ac",
+      "--color-agent-idle": "#7a8698"
+    },
+    "dark": {
+      "--color-component-base": "#3b4252",
+      "--color-component-hover": "rgba(216, 222, 233, 0.08)",
+      "--color-component-pressed": "rgba(216, 222, 233, 0.14)",
+      "--color-component-selected-bg": "rgba(136, 192, 208, 0.20)",
+      "--color-component-selected-fg": "#88c0d0",
+      "--color-component-focus": "#88c0d0",
+      "--color-component-disabled": "rgba(216, 222, 233, 0.35)",
+      "--color-component-border": "rgba(216, 222, 233, 0.10)",
+      "--color-bg-window": "#2e3440",
+      "--color-bg-sidebar": "#252b36",
+      "--color-bg-card": "#3b4252",
+      "--color-text": "#eceff4",
+      "--color-text-muted": "rgba(236, 239, 244, 0.55)",
+      "--color-warn-fg": "#ebcb8b",
+      "--color-warn-bg": "rgba(235, 203, 139, 0.14)",
+      "--color-ok-fg": "#a3be8c",
+      "--color-ok-bg": "rgba(163, 190, 140, 0.14)",
+      "--color-danger-fg": "#bf616a",
+      "--color-danger-bg": "rgba(191, 97, 106, 0.18)",
+      "--color-agent-active": "#81a1c1",
+      "--color-agent-idle": "#4c566a"
+    }
+  }
+}

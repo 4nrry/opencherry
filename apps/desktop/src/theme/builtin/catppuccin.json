@@ -1,0 +1,52 @@
+{
+  "id": "catppuccin",
+  "name": "Catppuccin",
+  "modes": {
+    "light": {
+      "--color-component-base": "#eff1f5",
+      "--color-component-hover": "rgba(76, 79, 105, 0.08)",
+      "--color-component-pressed": "rgba(76, 79, 105, 0.14)",
+      "--color-component-selected-bg": "rgba(136, 57, 239, 0.14)",
+      "--color-component-selected-fg": "#7287fd",
+      "--color-component-focus": "#8839ef",
+      "--color-component-disabled": "rgba(76, 79, 105, 0.35)",
+      "--color-component-border": "rgba(76, 79, 105, 0.12)",
+      "--color-bg-window": "#eff1f5",
+      "--color-bg-sidebar": "#e6e9ef",
+      "--color-bg-card": "#ffffff",
+      "--color-text": "#4c4f69",
+      "--color-text-muted": "rgba(76, 79, 105, 0.55)",
+      "--color-warn-fg": "#df8e1d",
+      "--color-warn-bg": "rgba(223, 142, 29, 0.14)",
+      "--color-ok-fg": "#40a02b",
+      "--color-ok-bg": "rgba(64, 160, 43, 0.14)",
+      "--color-danger-fg": "#d20f39",
+      "--color-danger-bg": "rgba(210, 15, 57, 0.12)",
+      "--color-agent-active": "#1e66f5",
+      "--color-agent-idle": "#9ca0b0"
+    },
+    "dark": {
+      "--color-component-base": "#313244",
+      "--color-component-hover": "rgba(205, 214, 244, 0.08)",
+      "--color-component-pressed": "rgba(205, 214, 244, 0.14)",
+      "--color-component-selected-bg": "rgba(203, 166, 247, 0.20)",
+      "--color-component-selected-fg": "#cba6f7",
+      "--color-component-focus": "#cba6f7",
+      "--color-component-disabled": "rgba(205, 214, 244, 0.35)",
+      "--color-component-border": "rgba(205, 214, 244, 0.10)",
+      "--color-bg-window": "#1e1e2e",
+      "--color-bg-sidebar": "#181825",
+      "--color-bg-card": "#313244",
+      "--color-text": "#cdd6f4",
+      "--color-text-muted": "rgba(205, 214, 244, 0.55)",
+      "--color-warn-fg": "#f9e2af",
+      "--color-warn-bg": "rgba(249, 226, 175, 0.12)",
+      "--color-ok-fg": "#a6e3a1",
+      "--color-ok-bg": "rgba(166, 227, 161, 0.12)",
+      "--color-danger-fg": "#f38ba8",
+      "--color-danger-bg": "rgba(243, 139, 168, 0.14)",
+      "--color-agent-active": "#89b4fa",
+      "--color-agent-idle": "#6c7086"
+    }
+  }
+}
