@@ -1,4 +1,4 @@
-export const COLOR_TOKENS: string[] = [
+export const COLOR_TOKENS: readonly string[] = [
   "--color-component-base",
   "--color-component-hover",
   "--color-component-pressed",

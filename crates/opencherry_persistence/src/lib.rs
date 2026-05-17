@@ -278,8 +278,8 @@ pub fn insert_custom_theme(config_dir: &Path, theme: &Theme) -> anyhow::Result<(
     let json = serde_json::to_string(theme)?;
     conn.execute(
         r#"
-        INSERT OR REPLACE INTO custom_themes (id, name, json)
-        VALUES (?1, ?2, ?3)
+        INSERT INTO custom_themes (id, name, json) VALUES (?1, ?2, ?3)
+        ON CONFLICT(id) DO UPDATE SET name = excluded.name, json = excluded.json
         "#,
         params![theme.id, theme.name, json],
     )?;
@@ -629,6 +629,48 @@ mod tests {
         let themes = list_custom_themes(config_dir.path()).unwrap();
         assert_eq!(themes.len(), 1);
         assert_eq!(themes[0].name, "Replaced Name");
+    }
+
+    #[test]
+    fn insert_custom_theme_update_preserves_created_at() {
+        let config_dir = TestDir::new("themes-preserve-created-at");
+
+        let original = sample_theme("stable-id", "Original Name");
+        insert_custom_theme(config_dir.path(), &original).unwrap();
+
+        // Read the created_at from the DB before the update.
+        let conn = Connection::open(db_path(config_dir.path())).unwrap();
+        let created_at_before: String = conn
+            .query_row(
+                "SELECT created_at FROM custom_themes WHERE id = 'stable-id'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        drop(conn);
+
+        let replacement = sample_theme("stable-id", "Updated Name");
+        insert_custom_theme(config_dir.path(), &replacement).unwrap();
+
+        let conn = Connection::open(db_path(config_dir.path())).unwrap();
+        let created_at_after: String = conn
+            .query_row(
+                "SELECT created_at FROM custom_themes WHERE id = 'stable-id'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        drop(conn);
+
+        // The update must not reset created_at.
+        assert_eq!(
+            created_at_before, created_at_after,
+            "update must preserve the original created_at"
+        );
+
+        let themes = list_custom_themes(config_dir.path()).unwrap();
+        assert_eq!(themes.len(), 1);
+        assert_eq!(themes[0].name, "Updated Name");
     }
 
     #[test]

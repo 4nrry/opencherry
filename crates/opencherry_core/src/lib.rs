@@ -181,7 +181,7 @@ pub struct FontPref {
 }
 
 /// Persisted user preferences for theme and typography.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Preferences {
     pub theme_id: String,
@@ -210,7 +210,7 @@ impl Default for Preferences {
 }
 
 /// Light and dark colour token maps for a theme.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ThemeModes {
     pub light: BTreeMap<String, String>,
@@ -218,7 +218,7 @@ pub struct ThemeModes {
 }
 
 /// A custom colour theme importable by the user.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Theme {
     pub id: String,

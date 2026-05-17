@@ -61,6 +61,7 @@
   --font-size-l:    1rem;
   --font-size-xl:   1.5rem;
   --font-size-xxl:  2rem;
+  /* Font families & base sizes */
   --font-ui: system-ui, -apple-system, "Segoe UI", "Cantarell", "Ubuntu", sans-serif;
   --font-ui-size: 14px;
   --font-mono: ui-monospace, "JetBrains Mono", "Fira Code", monospace;
@@ -549,6 +550,8 @@ body,
   color: inherit;
   padding: var(--space-xs);
   font: inherit;
+  font-family: var(--font-mono);
+  font-size: var(--font-mono-size);
 }
 
 .commit-box__actions {

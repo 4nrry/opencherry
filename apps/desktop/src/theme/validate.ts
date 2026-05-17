@@ -20,10 +20,17 @@ export function validateTheme(
   for (const mode of modes) {
     for (const token of COLOR_TOKENS) {
       if (!(token in completedModes[mode])) {
-        completedModes[mode][token] = fallback.modes[mode][token];
-        warnings.push(
-          `Theme "${theme.id}" is missing token "${token}" in "${mode}" mode; filled from fallback.`,
-        );
+        const fallbackValue = fallback.modes[mode][token];
+        if (fallbackValue !== undefined) {
+          completedModes[mode][token] = fallbackValue;
+          warnings.push(
+            `Theme "${theme.id}" is missing token "${token}" in "${mode}" mode; filled from fallback.`,
+          );
+        } else {
+          warnings.push(
+            `Theme "${theme.id}" is missing token "${token}" in "${mode}" mode; and the fallback has no value either.`,
+          );
+        }
       }
     }
   }

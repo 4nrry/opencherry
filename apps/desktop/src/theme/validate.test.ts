@@ -122,6 +122,43 @@ describe("validateTheme — id and name validation", () => {
   });
 });
 
+describe("validateTheme — incomplete fallback", () => {
+  it("does not write undefined when the fallback is also missing the token, and warns distinctly", () => {
+    const theme = makeCompleteTheme();
+    delete (theme.modes.light as Record<string, string>)["--color-bg-window"];
+
+    // Build a fallback that is also missing the same token.
+    const incompleteFallback: Theme = {
+      id: "incomplete-fallback",
+      name: "Incomplete Fallback",
+      modes: {
+        light: { ...fallback.modes.light },
+        dark: { ...fallback.modes.dark },
+      },
+    };
+    delete (incompleteFallback.modes.light as Record<string, string>)["--color-bg-window"];
+
+    const { theme: result, warnings } = validateTheme(theme, incompleteFallback);
+
+    // The token must NOT be present (no undefined entry written).
+    expect("--color-bg-window" in result.modes.light).toBe(false);
+
+    // A distinct warning mentioning the fallback must be emitted.
+    expect(
+      warnings.some(
+        (w) =>
+          w.includes("--color-bg-window") &&
+          w.toLowerCase().includes("fallback"),
+      ),
+    ).toBe(true);
+
+    // The warning should be the "fallback has no value either" variant.
+    expect(
+      warnings.some((w) => w.includes("fallback has no value either")),
+    ).toBe(true);
+  });
+});
+
 describe("validateTheme — all builtin themes are complete", () => {
   it("each builtin theme validates with zero warnings against the fallback", async () => {
     const { BUILTIN_THEMES } = await import("./builtin/index");
