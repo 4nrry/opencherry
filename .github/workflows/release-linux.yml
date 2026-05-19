@@ -1,0 +1,74 @@
+name: Release (Linux)
+
+# Builds the OpenCherry desktop app as a Debian package (.deb).
+#
+# Triggers:
+#   - Push of a tag matching `v*` (e.g. v0.0.1) — attaches the .deb to the
+#     matching GitHub Release.
+#   - Manual `workflow_dispatch` — uploads the .deb as a build artifact only
+#     (no release).
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Linux desktop dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: apps/desktop/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: apps/desktop
+
+      - name: Build .deb package
+        run: pnpm tauri build --bundles deb
+        working-directory: apps/desktop
+
+      - name: Upload .deb artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: opencherry-linux-deb
+          path: target/release/bundle/deb/*.deb
+          if-no-files-found: error
+
+      - name: Attach .deb to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: target/release/bundle/deb/*.deb
