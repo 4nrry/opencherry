@@ -179,6 +179,34 @@ over the old one. To remove:
 sudo apt remove open-cherry
 ```
 
+### Windows installer (`.exe`)
+
+Windows builds produce an NSIS installer. There are two ways to get one.
+
+**Download from CI** — every tagged release (`v*`) attaches a Windows installer
+to its GitHub Release. Manually triggering the **Release (Windows)** workflow
+(`workflow_dispatch`) also builds one and uploads it as a downloadable build
+artifact, so contributors can grab a build without a Windows machine.
+
+**Build locally on Windows** — install the prerequisites first:
+
+- Rust stable via `rustup` (MSVC toolchain)
+- Node.js 20+ and pnpm 9+
+- Microsoft Visual Studio C++ Build Tools (MSVC linker)
+- WebView2 runtime (preinstalled on Windows 10/11)
+
+`git2` builds with `vendored-libgit2`, so no system libgit2 or OpenSSL is
+needed. Then, from the repo root in PowerShell:
+
+```powershell
+.\scripts\build-windows.ps1
+```
+
+This runs `pnpm -C apps/desktop tauri build --bundles nsis` and prints the path
+of the generated installer — `target\release\bundle\nsis\OpenCherry_<version>_x64-setup.exe`.
+Double-click it to install. The installer is unsigned, so Windows SmartScreen
+may warn on first run; choose **More info → Run anyway**.
+
 ## Testing
 
 The current codebase includes backend and frontend automated coverage for the
