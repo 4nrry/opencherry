@@ -11,6 +11,7 @@ import {
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import type {
+  AgentKind,
   CommitResult,
   DetectedAgent,
   DiscardOutcome,
@@ -35,6 +36,11 @@ function pathContains(path: string, base: string) {
   }
 
   return normalizedPath === normalizedBase || normalizedPath.startsWith(`${normalizedBase}/`);
+}
+
+function formatAgentKind(kind: AgentKind): string {
+  if (typeof kind === "string") return kind;
+  return kind.custom;
 }
 
 function agentMatchesRepoPath(agent: DetectedAgent, repoPath: string) {
@@ -90,6 +96,10 @@ async function syncChanges(path: string): Promise<RepoActionResult> {
   return await invoke<RepoActionResult>("sync_repo_changes", { path });
 }
 
+async function syncAgentRules(): Promise<number> {
+  return await invoke<number>("sync_agent_rules");
+}
+
 export const __testables = {
   fetchRepos,
   fetchAgents,
@@ -122,10 +132,15 @@ export default function App() {
       return agentMatchesRepoPath(agent, repo.path);
     }).length;
 
-  // Poll agents every 3s.
+  // Poll agents every 3s, but pause if any agent is being edited.
+  const [isEditingAny, setIsEditingAny] = createSignal(false);
   let agentsTimer: ReturnType<typeof setInterval> | undefined;
   onMount(() => {
-    agentsTimer = setInterval(() => refetchAgents(), 3000);
+    agentsTimer = setInterval(() => {
+      if (!isEditingAny()) {
+        refetchAgents();
+      }
+    }, 3000);
   });
   onCleanup(() => {
     if (agentsTimer) clearInterval(agentsTimer);
@@ -221,10 +236,12 @@ export default function App() {
             </div>
           }
         >
-          <Show when={selected()?.kind === "group"} fallback={<RepoView repo={selected()!} agents={agents() ?? []} requestConfirm={requestConfirm} />}>
+          <Show when={selected()?.kind === "group"} fallback={<RepoView repo={selected()!} agents={agents() ?? []} requestConfirm={requestConfirm} onRename={async () => { await refetchAgents(); }} onEditStateChange={setIsEditingAny} />}>
             <RepoGroupView
               group={selected()!}
               agents={agents() ?? []}
+              onRename={async () => { await refetchAgents(); }}
+              onEditStateChange={setIsEditingAny}
               trackedRepoPaths={trackedRepoPaths()}
               onRegisterRepo={async (repo) => {
                 setError(null);
@@ -261,7 +278,17 @@ export default function App() {
           {(e) => <div class="banner banner--error">{e()}</div>}
         </Show>
 
-        <AgentsPanel agents={agents} />
+        <AgentsPanel 
+          agents={agents} 
+          onSync={async () => { 
+            await syncAgentRules(); 
+            // Give the DB a split second to settle before scanning processes
+            await new Promise(r => setTimeout(r, 100));
+            await refetchAgents(); 
+          }} 
+          onRename={async () => { await refetchAgents(); }}
+          onEditStateChange={setIsEditingAny}
+        />
       </main>
     </div>
     <ConfirmDialog
@@ -283,6 +310,8 @@ function RepoGroupView(props: {
   onRegisterRepo: (repo: RepoRef) => Promise<void>;
   onRegisterRepos: (repos: RepoRef[]) => Promise<void>;
   onSelectRepo: (repo: RepoRef) => void;
+  onRename: () => Promise<void>;
+  onEditStateChange?: (editing: boolean) => void;
 }) {
   const [snapshot, { refetch }] = createResource(
     () => props.group.path,
@@ -395,6 +424,8 @@ function RepoGroupView(props: {
               title="Agents in This Group"
               agents={groupAgents()}
               empty="No detected agents mapped to this group."
+              onRename={props.onRename}
+              onEditStateChange={props.onEditStateChange}
             />
 
             <section class="diff-panel">
@@ -503,7 +534,7 @@ function RepoGroupView(props: {
                               {repoAgents(entry.repo.path).length} agent{repoAgents(entry.repo.path).length === 1 ? "" : "s"}
                             </span>
                             <For each={repoAgents(entry.repo.path)}>
-                              {(agent) => <span class="target-agent-chip">{agent.kind}</span>}
+                              {(agent) => <span class="target-agent-chip">{formatAgentKind(agent.kind)}</span>}
                             </For>
                           </div>
                         </Show>
@@ -524,6 +555,8 @@ function RepoView(props: {
   repo: RepoRef;
   agents: DetectedAgent[];
   requestConfirm: (req: ConfirmRequest) => void;
+  onRename: () => Promise<void>;
+  onEditStateChange?: (editing: boolean) => void;
 }) {
   const [status, { refetch }] = createResource(
     () => props.repo.path,
@@ -667,6 +700,8 @@ function RepoView(props: {
               title="Agents in This Repo"
               agents={repoAgents()}
               empty="No detected agents mapped to this repository."
+              onRename={props.onRename}
+              onEditStateChange={props.onEditStateChange}
             />
 
             <section class="commit-box">
@@ -1013,7 +1048,13 @@ function StatusCard(props: {
   );
 }
 
-export function TargetAgentsPanel(props: { title: string; agents: DetectedAgent[]; empty: string }) {
+export function TargetAgentsPanel(props: { 
+  title: string; 
+  agents: DetectedAgent[]; 
+  empty: string; 
+  onRename?: (id: string, name: string) => void;
+  onEditStateChange?: (editing: boolean) => void;
+}) {
   return (
     <section class="agents target-agents">
       <header class="agents__header">
@@ -1026,7 +1067,7 @@ export function TargetAgentsPanel(props: { title: string; agents: DetectedAgent[
       >
         <ul class="agents__list">
           <For each={props.agents}>
-            {(a) => <AgentRow agent={a} />}
+            {(a) => <AgentRow agent={a} onRename={props.onRename} onEditStateChange={props.onEditStateChange} />}
           </For>
         </ul>
       </Show>
@@ -1034,18 +1075,86 @@ export function TargetAgentsPanel(props: { title: string; agents: DetectedAgent[
   );
 }
 
-function AgentRow(props: { agent: DetectedAgent }) {
+function AgentRow(props: { 
+  agent: DetectedAgent; 
+  onRename?: (id: string, newName: string) => void;
+  onEditStateChange?: (editing: boolean) => void;
+}) {
   const status = () => props.agent.status ?? "idle";
   const isSubprocess = () => Boolean(props.agent.parent_id);
+  const isInactive = () => status() === "suspended" || status() === "zombie";
+  
+  const [isEditing, setIsEditing] = createSignal(false);
+  const [tempName, setTempName] = createSignal(props.agent.display_name);
+
+  let inputRef: HTMLInputElement | undefined;
+
+  const toggleEditing = (editing: boolean) => {
+    setIsEditing(editing);
+    props.onEditStateChange?.(editing);
+  };
+
+  createEffect(() => {
+    if (isEditing()) {
+      inputRef?.focus();
+      inputRef?.select();
+    }
+  });
+
+  const handleRename = () => {
+    if (tempName() !== props.agent.display_name) {
+      props.onRename?.(props.agent.id, tempName());
+    }
+    toggleEditing(false);
+  };
+
   return (
-    <li class={`agents__item${isSubprocess() ? " agents__item--subprocess" : ""}`}>
+    <li 
+      class={`agents__item${isSubprocess() ? " agents__item--subprocess" : ""}${isInactive() ? " agents__item--inactive" : ""}`}
+      title={isInactive() ? `Possible zombie/suspended process (Status: ${status()})` : ""}
+    >
       <div class="agents__name">
         <span
           class={`agent-status agent-status--${status()}`}
           aria-label={status()}
           title={status()}
         />
-        {props.agent.display_name}
+        <Show 
+          when={isEditing()} 
+          fallback={
+            <span 
+              class={isInactive() ? "text--muted" : ""} 
+              onDblClick={() => toggleEditing(true)}
+            >
+              {props.agent.display_name}
+              <span class="agents__pid"> (pid {props.agent.pid})</span>
+            </span>
+          }
+        >
+          <input
+            ref={inputRef}
+            type="text"
+            class="agents__edit-input"
+            value={tempName()}
+            onInput={(e) => setTempName(e.currentTarget.value)}
+            onBlur={handleRename}
+            onKeyDown={(e) => e.key === "Enter" && handleRename()}
+          />
+        </Show>
+        
+        <button 
+          class="agents__edit-btn" 
+          onClick={() => toggleEditing(!isEditing())}
+          title="Rename agent"
+        >
+          ✏️
+        </button>
+
+        <Show when={isInactive()}>
+          <span class="badge badge--warning" style="margin-left: 8px; font-size: 0.6rem;">
+            POSSIBLY SUSPENDED
+          </span>
+        </Show>
       </div>
       <div class="agents__meta">
         <Show when={isSubprocess()}>
@@ -1056,7 +1165,7 @@ function AgentRow(props: { agent: DetectedAgent }) {
             ↳ subprocess
           </span>
         </Show>
-        <span class="agents__kind">{props.agent.kind}</span>
+        <span class="agents__kind">{formatAgentKind(props.agent.kind)}</span>
         <Show when={props.agent.targets.repos.length > 0}>
           <span class="agents__repos">
             <For each={props.agent.targets.repos}>
@@ -1072,15 +1181,53 @@ function AgentRow(props: { agent: DetectedAgent }) {
   );
 }
 
-function AgentsPanel(props: { agents: Resource<DetectedAgent[]> }) {
+function AgentsPanel(props: { 
+  agents: Resource<DetectedAgent[]>; 
+  onSync: () => Promise<void>;
+  onRename: () => Promise<void>;
+  onEditStateChange?: (editing: boolean) => void;
+}) {
   const unmatchedAgents = () =>
     (props.agents() ?? []).filter((agent) => agent.targets.repos.length === 0 && agent.targets.groups.length === 0);
+
+  const [syncing, setSyncing] = createSignal(false);
+
+  const handleSync = async () => {
+    setSyncing(true);
+    try {
+      await props.onSync();
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const handleRename = async (id: string, name: string) => {
+    try {
+      const agent = (props.agents() ?? []).find(a => a.id === id);
+      if (agent) {
+        await invoke("update_agent_name", { id: agent.definition_id, name });
+        await props.onRename();
+      }
+    } catch (e) {
+      console.error("Failed to rename agent:", e);
+    }
+  };
 
   return (
     <section class="agents">
       <header class="agents__header">
-        <h2>Detected agents</h2>
-        <span class="agents__count">{(props.agents() ?? []).length}</span>
+        <div class="agents__header-title">
+          <h2>Detected agents</h2>
+          <span class="agents__count">{(props.agents() ?? []).length}</span>
+        </div>
+        <button
+          class="btn btn--tiny"
+          onClick={handleSync}
+          disabled={syncing()}
+          title="Sync agent rules from GitHub"
+        >
+          {syncing() ? "Syncing..." : "Sync Rules"}
+        </button>
       </header>
       <Show when={unmatchedAgents().length > 0}>
         <div class="banner banner--warn">
@@ -1097,8 +1244,8 @@ function AgentsPanel(props: { agents: Resource<DetectedAgent[]> }) {
         }
       >
         <ul class="agents__list">
-          <For each={props.agents()}>
-            {(a) => <AgentRow agent={a} />}
+          <For each={props.agents() ?? []}>
+            {(a) => <AgentRow agent={a} onRename={handleRename} onEditStateChange={props.onEditStateChange} />}
           </For>
         </ul>
       </Show>

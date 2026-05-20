@@ -100,7 +100,28 @@ Additional crates (`opencherry_inject`, `opencherry_commit_msg`,
 
 ## Development
 
-### System dependencies (Ubuntu 24.04+)
+### Quick Start (Recommended)
+
+The easiest way to set up the project is using the provided setup script and `just` task runner.
+
+1. **Install all dependencies:**
+   ```bash
+   ./scripts/setup.sh
+   ```
+
+2. **Run the app:**
+   ```bash
+   just dev
+   ```
+
+3. **Run tests:**
+   ```bash
+   just test
+   ```
+
+### Manual Setup
+
+#### System dependencies (Ubuntu 24.04+)
 
 ```bash
 sudo apt install libwebkit2gtk-4.1-dev \
@@ -111,28 +132,23 @@ sudo apt install libwebkit2gtk-4.1-dev \
   libayatana-appindicator3-dev
 ```
 
-### Toolchain
+#### Toolchain
 
 - Rust stable (1.80+)
 - Node.js 20+
 - pnpm 9+
 
-### Run dev shell
+#### Run dev shell
 
 ```bash
-cd apps/desktop
-pnpm install
-pnpm tauri dev
+pnpm -C apps/desktop install
+pnpm -C apps/desktop tauri dev
 ```
 
 ### Validate
 
 ```bash
-cargo check --workspace
-cargo test --workspace
-pnpm -C apps/desktop test
-pnpm -C apps/desktop build
-pnpm -C apps/desktop test:e2e
+just check
 ```
 
 ## Packaging & local install

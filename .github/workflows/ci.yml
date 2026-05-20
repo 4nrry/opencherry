@@ -14,11 +14,39 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Install Linux desktop dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: apps/desktop/pnpm-lock.yaml
+
+      - name: Install frontend dependencies
+        run: pnpm -C apps/desktop install --frozen-lockfile
+
+      - name: Build frontend
+        run: pnpm -C apps/desktop build
 
       - name: Run Rust tests
         run: cargo test --workspace
@@ -75,7 +103,7 @@ jobs:
             libappindicator3-dev \
             librsvg2-dev \
             patchelf \
-            webkitgtk-webdriver \
+            webkit2gtk-driver \
             xvfb
 
       - name: Install Rust toolchain
@@ -99,11 +127,14 @@ jobs:
       - name: Install JS dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Install e2e dependencies
+        run: pnpm --dir e2e install --frozen-lockfile
+
       - name: Install tauri-driver
         run: cargo install tauri-driver --locked
 
       - name: Verify WebKit WebDriver
-        run: which WebKitWebDriver
+        run: which WebKitWebDriver || which webkit2gtk-driver || dpkg -L webkit2gtk-driver | grep bin
 
       - name: Run desktop E2E
         run: pnpm test:e2e

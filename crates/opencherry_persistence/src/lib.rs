@@ -3,7 +3,7 @@
 //! SQLite-backed storage in the platform app config dir. A one-time import
 //! from the Sprint 1 `repos.json` keeps local development data intact.
 
-use opencherry_core::{Preferences, RepoId, RepoRef, Theme, TrackedTargetKind};
+use opencherry_core::{AgentDefinition, Preferences, RepoId, RepoRef, Theme, TrackedTargetKind};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -72,6 +72,9 @@ fn migrate(conn: &Connection) -> anyhow::Result<()> {
             json TEXT NOT NULL,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
+
+        DROP TABLE IF EXISTS agent_definitions;
+        DROP TRIGGER IF EXISTS agent_definitions_set_updated_at;
         "#,
     )?;
 
@@ -294,6 +297,128 @@ pub fn remove_custom_theme(config_dir: &Path, id: &str) -> anyhow::Result<bool> 
 }
 
 // ---------------------------------------------------------------------------
+// Agent definitions
+// ---------------------------------------------------------------------------
+
+const DEFAULT_AGENTS_JSON: &str = include_str!("../../../resources/default_agents.json");
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct UserConfigSchema {
+    agents: Option<Vec<AgentDefinition>>,
+}
+
+fn resolve_config_file_path(config_dir: &Path) -> PathBuf {
+    if cfg!(test) {
+        config_dir.join("opencherry.json")
+    } else {
+        dirs::home_dir()
+            .map(|h| h.join(".opencherry").join("opencherry.json"))
+            .unwrap_or_else(|| config_dir.join("opencherry.json"))
+    }
+}
+
+fn load_user_config(config_dir: &Path) -> (PathBuf, UserConfigSchema) {
+    let path = resolve_config_file_path(config_dir);
+    if !path.exists() {
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        return (
+            path,
+            UserConfigSchema {
+                agents: Some(Vec::new()),
+            },
+        );
+    }
+
+    let content = match std::fs::read_to_string(&path) {
+        Ok(c) => c,
+        Err(_) => {
+            return (
+                path,
+                UserConfigSchema {
+                    agents: Some(Vec::new()),
+                },
+            )
+        }
+    };
+
+    let schema = serde_json::from_str(&content).unwrap_or_else(|_| UserConfigSchema {
+        agents: Some(Vec::new()),
+    });
+    (path, schema)
+}
+
+fn save_user_config(path: &Path, schema: &UserConfigSchema) -> anyhow::Result<()> {
+    let content = serde_json::to_string_pretty(schema)?;
+    std::fs::write(path, content)?;
+    Ok(())
+}
+
+/// Return all agent definitions merged from default embedded and local overrides.
+pub fn list_agent_definitions(config_dir: &Path) -> anyhow::Result<Vec<AgentDefinition>> {
+    // 1. Parse built-in rules embedded at compile-time
+    let mut defs: Vec<AgentDefinition> = serde_json::from_str(DEFAULT_AGENTS_JSON)?;
+    for d in &mut defs {
+        d.is_builtin = true;
+    }
+
+    // 2. Load and merge user-defined rules from ~/.opencherry/opencherry.json
+    let (_, schema) = load_user_config(config_dir);
+    if let Some(custom_agents) = schema.agents {
+        for mut custom in custom_agents {
+            custom.is_builtin = false;
+            // Overwrite existing or append
+            if let Some(pos) = defs.iter().position(|d| d.id == custom.id) {
+                defs[pos] = custom;
+            } else {
+                defs.push(custom);
+            }
+        }
+    }
+
+    // Stable sort
+    defs.sort_by(|a, b| {
+        b.is_builtin.cmp(&a.is_builtin).then_with(|| {
+            a.display_name
+                .to_lowercase()
+                .cmp(&b.display_name.to_lowercase())
+        })
+    });
+    Ok(defs)
+}
+
+/// Insert or replace an agent definition inside user's opencherry.json file.
+pub fn upsert_agent_definition(config_dir: &Path, def: &AgentDefinition) -> anyhow::Result<()> {
+    let (path, mut schema) = load_user_config(config_dir);
+    let mut agents = schema.agents.unwrap_or_default();
+
+    if let Some(pos) = agents.iter().position(|a| a.id == def.id) {
+        agents[pos] = def.clone();
+    } else {
+        agents.push(def.clone());
+    }
+
+    schema.agents = Some(agents);
+    save_user_config(&path, &schema)?;
+    Ok(())
+}
+
+/// Remove an agent definition by id from user's opencherry.json file.
+pub fn remove_agent_definition(config_dir: &Path, id: &str) -> anyhow::Result<bool> {
+    let (path, mut schema) = load_user_config(config_dir);
+    let mut agents = schema.agents.unwrap_or_default();
+
+    let original_len = agents.len();
+    agents.retain(|a| a.id != id);
+    let changed = agents.len() != original_len;
+
+    schema.agents = Some(agents);
+    save_user_config(&path, &schema)?;
+    Ok(changed)
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -314,6 +439,7 @@ fn parse_kind(kind: &str) -> TrackedTargetKind {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use opencherry_core::{AgentKind, AgentRule};
     use std::{
         fs,
         path::{Path, PathBuf},
@@ -777,5 +903,38 @@ mod tests {
             .iter()
             .any(|repo| repo.display_name == "workspace-group"
                 && repo.kind == TrackedTargetKind::Group));
+    }
+
+    #[test]
+    fn add_list_and_remove_agent_definitions() {
+        let dir = TestDir::new("persistence-agents");
+        let config = dir.path();
+
+        let initial_len = list_agent_definitions(config).unwrap().len();
+
+        let def = AgentDefinition {
+            id: "test-agent".into(),
+            kind: AgentKind::Custom("Test".into()),
+            display_name: "Test Agent".into(),
+            is_builtin: false,
+            rules: vec![AgentRule {
+                exe_basename: Some("test".into()),
+                exe_path_contains: None,
+                argv_contains: None,
+                exclude_path_contains: None,
+                require_shell_parent: true,
+            }],
+        };
+
+        upsert_agent_definition(config, &def).unwrap();
+        let list = list_agent_definitions(config).unwrap();
+        assert_eq!(list.len(), initial_len + 1);
+        let added = list.iter().find(|a| a.id == "test-agent").unwrap();
+        assert_eq!(added.rules.len(), 1);
+        assert!(added.rules[0].require_shell_parent);
+
+        remove_agent_definition(config, "test-agent").unwrap();
+        let list = list_agent_definitions(config).unwrap();
+        assert_eq!(list.len(), initial_len);
     }
 }
