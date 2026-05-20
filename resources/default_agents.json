@@ -1,0 +1,73 @@
+[
+  {
+    "id": "claude-code",
+    "kind": "claude-code",
+    "display_name": "Claude Code",
+    "is_builtin": true,
+    "rules": [
+      {
+        "exe_basename": "claude",
+        "require_shell_parent": true
+      },
+      {
+        "exe_basename": "claude-code",
+        "require_shell_parent": true
+      },
+      {
+        "exe_basename": "node",
+        "argv_contains": ["claude"],
+        "require_shell_parent": true
+      }
+    ]
+  },
+  {
+    "id": "codex",
+    "kind": "codex",
+    "display_name": "Codex",
+    "is_builtin": true,
+    "rules": [
+      {
+        "exe_basename": "codex",
+        "require_shell_parent": true
+      },
+      {
+        "exe_basename": "node",
+        "argv_contains": ["codex"],
+        "require_shell_parent": true
+      }
+    ]
+  },
+  {
+    "id": "antigravity-cli",
+    "kind": { "custom": "Antigravity CLI" },
+    "display_name": "Antigravity CLI",
+    "is_builtin": true,
+    "rules": [
+      {
+        "exe_basename": "agy",
+        "require_shell_parent": true
+      },
+      {
+        "exe_basename": "antigravity",
+        "require_shell_parent": true
+      }
+    ]
+  },
+  {
+    "id": "aider",
+    "kind": "aider",
+    "display_name": "Aider",
+    "is_builtin": true,
+    "rules": [
+      {
+        "exe_basename": "aider",
+        "require_shell_parent": true
+      },
+      {
+        "exe_basename": "python3",
+        "argv_contains": ["aider"],
+        "require_shell_parent": true
+      }
+    ]
+  }
+]

@@ -132,21 +132,45 @@ pub enum AgentKind {
     GeminiCli,
     Aider,
     CopilotCli,
+    Custom(String),
     Unknown,
 }
 
 impl AgentKind {
-    pub fn display_name(&self) -> &'static str {
+    pub fn display_name(&self) -> String {
         match self {
-            AgentKind::ClaudeCode => "Claude Code",
-            AgentKind::OpenCode => "OpenCode",
-            AgentKind::Codex => "Codex",
-            AgentKind::GeminiCli => "Gemini CLI",
-            AgentKind::Aider => "Aider",
-            AgentKind::CopilotCli => "Copilot CLI",
-            AgentKind::Unknown => "Unknown",
+            AgentKind::ClaudeCode => "Claude Code".to_string(),
+            AgentKind::OpenCode => "OpenCode".to_string(),
+            AgentKind::Codex => "Codex".to_string(),
+            AgentKind::GeminiCli => "Gemini CLI".to_string(),
+            AgentKind::Aider => "Aider".to_string(),
+            AgentKind::CopilotCli => "Copilot CLI".to_string(),
+            AgentKind::Custom(name) => name.clone(),
+            AgentKind::Unknown => "Unknown".to_string(),
         }
     }
+}
+
+/// A rule used to detect a running agent process.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AgentRule {
+    pub exe_basename: Option<String>,
+    pub exe_path_contains: Option<String>,
+    pub argv_contains: Option<Vec<String>>,
+    pub exclude_path_contains: Option<Option<String>>,
+    /// If true, the process's parent must be a known interactive shell.
+    pub require_shell_parent: bool,
+}
+
+/// A definition for an agent that can be detected by OpenCherry.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AgentDefinition {
+    pub id: String,
+    pub kind: AgentKind,
+    pub display_name: String,
+    pub rules: Vec<AgentRule>,
+    /// If true, this is a built-in rule that can be updated via sync.
+    pub is_builtin: bool,
 }
 
 #[derive(Debug, thiserror::Error)]

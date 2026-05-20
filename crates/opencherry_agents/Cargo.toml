@@ -11,5 +11,6 @@ description = "Detection and orchestration of AI coding agents for OpenCherry."
 opencherry_core = { workspace = true }
 sysinfo = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }

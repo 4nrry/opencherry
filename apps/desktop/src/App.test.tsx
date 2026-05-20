@@ -179,6 +179,7 @@ describe("TargetAgentsPanel", () => {
   function makeAgent(overrides: Partial<DetectedAgent> = {}): DetectedAgent {
     return {
       id: "agent-1",
+      definition_id: "open-code",
       kind: "open-code",
       display_name: "OpenCode (pid 42)",
       pid: 42,
@@ -591,6 +592,7 @@ describe("App", () => {
     const repoAgents: DetectedAgent[] = [
       {
         id: "agent-1",
+        definition_id: "open-code",
         kind: "open-code",
         display_name: "OpenCode (pid 42)",
         pid: 42,
@@ -660,6 +662,7 @@ describe("App", () => {
     const mixedAgents: DetectedAgent[] = [
       {
         id: "agent-1",
+        definition_id: "open-code",
         kind: "open-code",
         display_name: "OpenCode (pid 42)",
         pid: 42,
@@ -672,6 +675,7 @@ describe("App", () => {
       },
       {
         id: "agent-2",
+        definition_id: "gemini-cli",
         kind: "gemini-cli",
         display_name: "Gemini CLI (pid 77)",
         pid: 77,
@@ -872,6 +876,7 @@ describe("App", () => {
     const groupAgents: DetectedAgent[] = [
       {
         id: "agent-1",
+        definition_id: "open-code",
         kind: "open-code",
         display_name: "OpenCode (pid 42)",
         pid: 42,
@@ -968,6 +973,7 @@ describe("App", () => {
     const groupAgents: DetectedAgent[] = [
       {
         id: "agent-1",
+        definition_id: "open-code",
         kind: "open-code",
         display_name: "OpenCode (pid 42)",
         pid: 42,

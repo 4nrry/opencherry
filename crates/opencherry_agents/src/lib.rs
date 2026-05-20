@@ -4,7 +4,9 @@
 //! Matches by executable name and known argv patterns. Heuristics will
 //! be refined as we observe real users.
 
-use opencherry_core::{AgentId, AgentKind, AgentTargetMatches, RepoRef, TrackedTargetKind};
+use opencherry_core::{
+    AgentDefinition, AgentId, AgentKind, AgentRule, AgentTargetMatches, RepoRef, TrackedTargetKind,
+};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, RefreshKind, System};
@@ -16,11 +18,16 @@ pub enum AgentStatus {
     Idle,
     /// Process is doing meaningful work (above CPU threshold).
     Generating,
+    /// Process is suspended (e.g. via SIGSTOP or Ctrl+Z).
+    Suspended,
+    /// Process has exited but is still in the process table.
+    Zombie,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DetectedAgent {
     pub id: AgentId,
+    pub definition_id: String,
     pub kind: AgentKind,
     pub display_name: String,
     pub pid: u32,
@@ -42,6 +49,7 @@ struct ProcessSnapshot {
     pid: u32,
     exe_path: String,
     exe_basename: String,
+    process_name: String,
     argv: Vec<String>,
     cwd: Option<String>,
     is_thread: bool,
@@ -49,6 +57,8 @@ struct ProcessSnapshot {
     cpu_usage: f32,
     /// Parent process pid (from sysinfo). Used to link subprocesses to their primary.
     ppid: Option<u32>,
+    /// Raw process status from sysinfo.
+    os_status: sysinfo::ProcessStatus,
 }
 
 /// Threshold (percent of one core) above which an agent is considered Generating.
@@ -57,74 +67,121 @@ const GENERATING_CPU_THRESHOLD: f32 = 5.0;
 /// Map an instantaneous CPU usage reading to an `AgentStatus`.
 ///
 /// Stateless and pure: callers decide how the CPU sample was obtained.
-pub fn classify_status(cpu_usage: f32) -> AgentStatus {
-    if cpu_usage >= GENERATING_CPU_THRESHOLD {
-        AgentStatus::Generating
-    } else {
-        AgentStatus::Idle
+pub fn classify_status(cpu_usage: f32, os_status: sysinfo::ProcessStatus) -> AgentStatus {
+    match os_status {
+        sysinfo::ProcessStatus::Stop => AgentStatus::Suspended,
+        sysinfo::ProcessStatus::Zombie => AgentStatus::Zombie,
+        _ => {
+            if cpu_usage >= GENERATING_CPU_THRESHOLD {
+                AgentStatus::Generating
+            } else {
+                AgentStatus::Idle
+            }
+        }
     }
 }
 
-/// Classify a process by exe basename and argv. Returns `None` if it
-/// doesn't look like a known agent.
-fn classify(exe_path: &str, exe_basename: &str, argv: &[&str]) -> Option<AgentKind> {
-    let exe_path_lc = exe_path.to_ascii_lowercase();
-    let exe = exe_basename.to_ascii_lowercase();
-    let joined = argv.join(" ").to_ascii_lowercase();
+/// Known interactive shell process names.
+const SHELL_PROCESS_NAMES: &[&str] = &["bash", "zsh", "fish", "sh", "dash", "tmux", "screen"];
 
-    if exe_path_lc.contains("/.antigravity/extensions/") {
+fn is_shell_process(exe_basename: &str) -> bool {
+    SHELL_PROCESS_NAMES.contains(&exe_basename)
+}
+
+/// Classify a process against a list of definitions.
+fn classify(
+    process: &ProcessSnapshot,
+    all_processes: &[ProcessSnapshot],
+    definitions: &[AgentDefinition],
+) -> Option<AgentKind> {
+    let exe_path_lc = process.exe_path.to_ascii_lowercase();
+
+    // Universal exclusions (except for Antigravity CLI itself)
+    if (exe_path_lc.contains("/.antigravity/extensions/")
+        || exe_path_lc.contains("/usr/share/antigravity/resources/app/extensions/"))
+        && !exe_path_lc.contains("/antigravity/bin/language_server")
+    {
         return None;
     }
 
-    // Newer claude-code installs ship a single binary at
-    // `.local/share/claude/versions/<X.Y.Z>`, so exe basename is a version
-    // string. Detect by install-path signature first.
-    if exe_path_lc.contains("/claude/versions/") {
-        return Some(AgentKind::ClaudeCode);
-    }
-
-    // Direct binary names first (cheap path).
-    match exe.as_str() {
-        "claude" | "claude-code" => return Some(AgentKind::ClaudeCode),
-        "opencode" => return Some(AgentKind::OpenCode),
-        "codex" => return Some(AgentKind::Codex),
-        "gemini" => return Some(AgentKind::GeminiCli),
-        "aider" => return Some(AgentKind::Aider),
-        "copilot" => return Some(AgentKind::CopilotCli),
-        _ => {}
-    }
-
-    // Node/Python wrappers: inspect argv for the package entry point.
-    if matches!(exe.as_str(), "node" | "deno" | "bun" | "python" | "python3" | "mainthread") {
-        if joined.contains("@anthropic-ai/claude-code") || joined.contains("/claude-code/") {
-            return Some(AgentKind::ClaudeCode);
-        }
-        if joined.contains("opencode") {
-            return Some(AgentKind::OpenCode);
-        }
-        if joined.contains("@openai/codex") || joined.contains("codex-cli") {
-            return Some(AgentKind::Codex);
-        }
-        if joined.contains("@google/gemini") || joined.contains("gemini-cli") {
-            return Some(AgentKind::GeminiCli);
-        }
-        if joined.contains("aider") {
-            return Some(AgentKind::Aider);
-        }
-        if joined.contains("copilot") || joined.contains("github-copilot") {
-            return Some(AgentKind::CopilotCli);
+    for def in definitions {
+        for rule in &def.rules {
+            if matches_rule(rule, process, all_processes) {
+                return Some(def.kind.clone());
+            }
         }
     }
 
     None
 }
 
+fn matches_rule(
+    rule: &AgentRule,
+    process: &ProcessSnapshot,
+    all_processes: &[ProcessSnapshot],
+) -> bool {
+    // 1. Exe basename match
+    if let Some(ref target) = rule.exe_basename {
+        if process.exe_basename.to_ascii_lowercase() != target.to_ascii_lowercase() 
+            && process.process_name.to_ascii_lowercase() != target.to_ascii_lowercase() {
+            return false;
+        }
+    }
+
+    // 2. Exe path contains
+    if let Some(ref target) = rule.exe_path_contains {
+        if !process.exe_path.to_ascii_lowercase().contains(&target.to_ascii_lowercase()) {
+            return false;
+        }
+    }
+
+    // 3. Argv contains
+    if let Some(ref targets) = rule.argv_contains {
+        let joined = process.argv.join(" ").to_ascii_lowercase();
+        for target in targets {
+            if !joined.contains(&target.to_ascii_lowercase()) {
+                return false;
+            }
+        }
+    }
+
+    // 4. Exclude path contains
+    if let Some(Some(ref target)) = rule.exclude_path_contains {
+        if process.exe_path.to_ascii_lowercase().contains(&target.to_ascii_lowercase()) {
+            return false;
+        }
+    }
+
+    // 5. Shell parent check
+    if rule.require_shell_parent {
+        let mut parent_pid = process.ppid;
+        let mut found_shell = false;
+        // Check up to 3 levels of ancestry
+        for _ in 0..3 {
+            if let Some(ppid) = parent_pid {
+                if let Some(parent) = all_processes.iter().find(|p| p.pid == ppid) {
+                    if is_shell_process(&parent.exe_basename) {
+                        found_shell = true;
+                        break;
+                    }
+                    parent_pid = parent.ppid;
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+        if !found_shell {
+            return false;
+        }
+    }
+
+    true
+}
+
 /// Snapshot of currently running agent processes.
-///
-/// Two sysinfo refreshes with a short sleep between so `cpu_usage` is meaningful
-/// (sysinfo returns 0% on first refresh of each process). The added latency
-/// (~250 ms) is acceptable given the 3 s frontend polling cadence.
-pub fn detect_running_agents() -> Vec<DetectedAgent> {
+pub fn detect_running_agents(definitions: &[AgentDefinition]) -> Vec<DetectedAgent> {
     let mut sys = System::new_with_specifics(
         RefreshKind::new().with_processes(ProcessRefreshKind::everything()),
     );
@@ -145,7 +202,8 @@ pub fn detect_running_agents() -> Vec<DetectedAgent> {
                 .exe()
                 .and_then(|p| p.file_name())
                 .map(|s| s.to_string_lossy().into_owned())
-                .unwrap_or_else(|| proc_.name().to_string_lossy().into_owned()),
+                .unwrap_or_default(),
+            process_name: proc_.name().to_string_lossy().into_owned(),
             argv: proc_
                 .cmd()
                 .iter()
@@ -155,10 +213,28 @@ pub fn detect_running_agents() -> Vec<DetectedAgent> {
             is_thread: proc_.thread_kind().is_some(),
             cpu_usage: proc_.cpu_usage(),
             ppid: proc_.parent().map(|p| p.as_u32()),
+            os_status: proc_.status(),
         })
         .collect::<Vec<_>>();
 
-    collect_detected_agents(&snapshots)
+    collect_detected_agents(&snapshots, definitions)
+}
+pub fn debug_dump_processes() -> serde_json::Value {
+    let mut sys = System::new_with_specifics(
+        RefreshKind::new().with_processes(ProcessRefreshKind::everything()),
+    );
+    sys.refresh_processes(ProcessesToUpdate::All, true);
+    
+    let list: Vec<serde_json::Value> = sys.processes().iter().map(|(pid, p)| {
+        serde_json::json!({
+            "pid": pid.as_u32(),
+            "name": p.name(),
+            "exe": p.exe().map(|path| path.to_string_lossy()),
+            "ppid": p.parent().map(|id| id.as_u32()),
+            "cmd": p.cmd()
+        })
+    }).collect();
+    serde_json::json!(list)
 }
 
 pub fn correlate_agents_to_targets(agents: Vec<DetectedAgent>, targets: &[RepoRef]) -> Vec<DetectedAgent> {
@@ -202,62 +278,50 @@ fn path_contains(path: &Path, base: &PathBuf) -> bool {
     path == base || path.starts_with(base)
 }
 
-fn collect_detected_agents(processes: &[ProcessSnapshot]) -> Vec<DetectedAgent> {
+fn collect_detected_agents(
+    processes: &[ProcessSnapshot],
+    definitions: &[AgentDefinition],
+) -> Vec<DetectedAgent> {
     let mut out = Vec::new();
-    for process in processes {
-        if process.is_thread {
+    
+    // First pass: identify all agents
+    for proc in processes {
+        if proc.is_thread {
             continue;
         }
-
-        // Skip threads — on Linux sysinfo includes /proc/<pid>/task/* by
-        // default, which would otherwise multiply each agent process by
-        // its thread count. `thread_kind() == None` means "real process".
-        let argv_refs: Vec<&str> = process.argv.iter().map(|s| s.as_str()).collect();
-
-        let Some(kind) = classify(&process.exe_path, &process.exe_basename, &argv_refs) else {
-            continue;
-        };
-
-        let pid_u32 = process.pid;
-        let display_name = format!("{} (pid {})", kind.display_name(), pid_u32);
-        let id = AgentId(format!("pid-{pid_u32}"));
-        let command_line = {
-            let s = process.argv.join(" ");
-            if s.len() > 200 {
-                format!("{}…", &s[..200])
-            } else {
-                s
-            }
-        };
-
-        out.push(DetectedAgent {
-            id,
-            kind,
-            display_name,
-            pid: pid_u32,
-            cwd: process.cwd.clone(),
-            command_line,
-            targets: AgentTargetMatches::default(),
-            status: classify_status(process.cpu_usage),
-            parent_id: None,
-        });
+        if let Some(kind) = classify(proc, processes, definitions) {
+            let def = definitions.iter().find(|d| d.kind == kind).unwrap();
+            out.push(DetectedAgent {
+                id: AgentId(proc.pid.to_string()),
+                definition_id: def.id.clone(),
+                kind: kind.clone(),
+                display_name: def.display_name.clone(),
+                pid: proc.pid,
+                cwd: proc.cwd.clone(),
+                command_line: proc.argv.join(" "),
+                targets: AgentTargetMatches::default(),
+                status: classify_status(proc.cpu_usage, proc.os_status),
+                parent_id: None, // Will populate in second pass
+            });
+        }
     }
 
-    out.sort_by(|a, b| a.pid.cmp(&b.pid));
-
-    // Second pass: any detected agent whose ppid is also a detected agent's pid
-    // is linked as a subprocess of that parent.
+    // Second pass: link parent/child relationships
+    let agent_pids: std::collections::HashSet<u32> = out.iter().map(|a| a.pid).collect();
     for i in 0..out.len() {
-        let ppid = processes
-            .iter()
-            .find(|p| p.pid == out[i].pid)
-            .and_then(|p| p.ppid);
-        let Some(ppid) = ppid else { continue };
-        let parent_id = out.iter().find(|a| a.pid == ppid).map(|a| a.id.clone());
-        if parent_id.is_some() {
-            out[i].parent_id = parent_id;
+        let pid = out[i].pid;
+        let ppid = processes.iter().find(|p| p.pid == pid).and_then(|p| p.ppid);
+        
+        if let Some(ppid) = ppid {
+            // Only link direct parent/child relationships
+            if agent_pids.contains(&ppid) {
+                out[i].parent_id = Some(AgentId(ppid.to_string()));
+            }
         }
     }
+
+    // Stable sort by PID
+    out.sort_by(|a, b| a.pid.cmp(&b.pid));
 
     out
 }
@@ -288,81 +352,97 @@ mod tests {
             pid,
             exe_path: exe_path.to_string(),
             exe_basename: exe_basename.to_string(),
+            process_name: exe_basename.to_string(),
             argv: argv.iter().map(|arg| arg.to_string()).collect(),
             cwd: Some("/workspace".to_string()),
             is_thread,
             cpu_usage,
             ppid: None,
+            os_status: sysinfo::ProcessStatus::Run,
+        }
+    }
+
+    fn snapshot_with_parent(
+        pid: u32,
+        ppid: Option<u32>,
+        exe_path: &str,
+        exe_basename: &str,
+        argv: &[&str],
+        is_thread: bool,
+    ) -> ProcessSnapshot {
+        ProcessSnapshot {
+            pid,
+            exe_path: exe_path.to_string(),
+            exe_basename: exe_basename.to_string(),
+            process_name: exe_basename.to_string(),
+            argv: argv.iter().map(|arg| arg.to_string()).collect(),
+            cwd: Some("/workspace".to_string()),
+            is_thread,
+            cpu_usage: 0.0,
+            ppid,
+            os_status: sysinfo::ProcessStatus::Run,
+        }
+    }
+
+    fn def_opencode() -> AgentDefinition {
+        AgentDefinition {
+            id: "opencode".into(),
+            kind: AgentKind::OpenCode,
+            display_name: "OpenCode".into(),
+            is_builtin: true,
+            rules: vec![AgentRule {
+                exe_basename: Some("opencode".into()),
+                exe_path_contains: None,
+                argv_contains: None,
+                exclude_path_contains: None,
+                require_shell_parent: false,
+            }],
         }
     }
 
     #[test]
-    fn classify_matches_supported_agent_wrappers() {
-        assert_eq!(
-            classify(
-                "/usr/bin/node",
-                "node",
-                &["node", "/tmp/@anthropic-ai/claude-code/index.js"]
-            ),
-            Some(AgentKind::ClaudeCode)
-        );
-        assert_eq!(
-            classify("/usr/bin/opencode", "opencode", &["opencode"]),
-            Some(AgentKind::OpenCode)
-        );
-        assert_eq!(
-            classify("/usr/bin/python3", "python3", &["python3", "-m", "aider"]),
-            Some(AgentKind::Aider)
-        );
-        assert_eq!(
-            classify("/usr/bin/copilot", "copilot", &["copilot"]),
-            Some(AgentKind::CopilotCli)
-        );
+    fn classify_matches_by_exe_basename() {
+        let defs = vec![def_opencode()];
+        let proc = snapshot(123, "/usr/bin/opencode", "opencode", &["opencode"], false);
+        assert_eq!(classify(&proc, &[proc.clone()], &defs), Some(AgentKind::OpenCode));
     }
 
     #[test]
-    fn classify_detects_claude_code_by_install_path() {
-        // claude-code 2.x ships a single binary at `.local/share/claude/versions/<X.Y.Z>`,
-        // so the exe basename is a version string, not "claude".
-        assert_eq!(
-            classify(
-                "/home/user/.local/share/claude/versions/2.1.139",
-                "2.1.139",
-                &["claude", "--dangerously-skip-permissions"]
-            ),
-            Some(AgentKind::ClaudeCode)
-        );
+    fn classify_respects_shell_parent_requirement() {
+        let mut def = def_opencode();
+        def.rules[0].require_shell_parent = true;
+        let defs = vec![def];
+
+        let shell = snapshot(100, "/usr/bin/zsh", "zsh", &["zsh"], false);
+        let proc = snapshot_with_parent(200, Some(100), "/usr/bin/opencode", "opencode", &["opencode"], false);
+        let procs = vec![shell, proc.clone()];
+
+        // Case 1: Parent is a shell
+        assert_eq!(classify(&proc, &procs, &defs), Some(AgentKind::OpenCode));
+
+        // Case 2: Parent is NOT a shell
+        let not_shell = snapshot(101, "/usr/bin/init", "init", &["init"], false);
+        let proc2 = snapshot_with_parent(201, Some(101), "/usr/bin/opencode", "opencode", &["opencode"], false);
+        let procs2 = vec![not_shell, proc2.clone()];
+        assert_eq!(classify(&proc2, &procs2, &defs), None);
     }
 
     #[test]
     fn classify_ignores_antigravity_extensions() {
-        assert_eq!(
-            classify(
-                "/home/user/.antigravity/extensions/opencode/bin/opencode",
-                "opencode",
-                &["opencode"]
-            ),
-            None
+        let defs = vec![def_opencode()];
+        let proc = snapshot(
+            123,
+            "/home/user/.antigravity/extensions/opencode/bin/opencode",
+            "opencode",
+            &["opencode"],
+            false,
         );
-    }
-
-    #[test]
-    fn collect_detected_agents_filters_threads_and_sorts_by_pid() {
-        let agents = collect_detected_agents(&[
-            snapshot(400, "/usr/bin/opencode", "opencode", &["opencode"], false),
-            snapshot(200, "/usr/bin/node", "node", &["node", "codex-cli"], false),
-            snapshot(201, "/usr/bin/node", "node", &["node", "codex-cli"], true),
-        ]);
-
-        assert_eq!(agents.len(), 2);
-        assert_eq!(agents[0].pid, 200);
-        assert_eq!(agents[0].kind, AgentKind::Codex);
-        assert_eq!(agents[1].pid, 400);
-        assert_eq!(agents[1].kind, AgentKind::OpenCode);
+        assert_eq!(classify(&proc, &[proc.clone()], &defs), None);
     }
 
     #[test]
     fn correlate_agents_matches_repo_and_group_from_cwd() {
+        let defs = vec![def_opencode()];
         let workspace = PathBuf::from("/workspace");
         let group = RepoRef {
             id: opencherry_core::RepoId("group:/workspace".into()),
@@ -384,16 +464,19 @@ mod tests {
         };
 
         let agents = correlate_agents_to_targets(
-            collect_detected_agents(&[ProcessSnapshot {
-                pid: 123,
-                exe_path: "/usr/bin/opencode".into(),
-                exe_basename: "opencode".into(),
-                argv: vec!["opencode".into()],
-                cwd: Some("/workspace/app/src".into()),
-                is_thread: false,
-                cpu_usage: 0.0,
-                ppid: None,
-            }]),
+            collect_detected_agents(
+                &[ProcessSnapshot {
+                    pid: 123,
+                    exe_path: "/usr/bin/opencode".into(),
+                    exe_basename: "opencode".into(),
+                    argv: vec!["opencode".into()],
+                    cwd: Some("/workspace/app/src".into()),
+                    is_thread: false,
+                    cpu_usage: 0.0,
+                    ppid: None,
+                }],
+                &defs,
+            ),
             &[other_repo, repo.clone(), group.clone()],
         );
 
@@ -406,6 +489,7 @@ mod tests {
 
     #[test]
     fn correlate_agents_skips_targets_when_cwd_missing() {
+        let defs = vec![def_opencode()];
         let repo = RepoRef {
             id: opencherry_core::RepoId("repo:/workspace/app".into()),
             path: PathBuf::from("/workspace/app"),
@@ -414,16 +498,19 @@ mod tests {
         };
 
         let agents = correlate_agents_to_targets(
-            collect_detected_agents(&[ProcessSnapshot {
-                pid: 123,
-                exe_path: "/usr/bin/opencode".into(),
-                exe_basename: "opencode".into(),
-                argv: vec!["opencode".into()],
-                cwd: None,
-                is_thread: false,
-                cpu_usage: 0.0,
-                ppid: None,
-            }]),
+            collect_detected_agents(
+                &[ProcessSnapshot {
+                    pid: 123,
+                    exe_path: "/usr/bin/opencode".into(),
+                    exe_basename: "opencode".into(),
+                    argv: vec!["opencode".into()],
+                    cwd: None,
+                    is_thread: false,
+                    cpu_usage: 0.0,
+                    ppid: None,
+                }],
+                &defs,
+            ),
             &[repo],
         );
 
@@ -446,10 +533,30 @@ mod tests {
 
     #[test]
     fn collect_detected_agents_populates_status_from_cpu_usage() {
-        let agents = collect_detected_agents(&[
-            snapshot_with_cpu(100, "/usr/bin/opencode", "opencode", &["opencode"], false, 0.1),
-            snapshot_with_cpu(200, "/usr/bin/claude", "claude", &["claude"], false, 20.0),
-        ]);
+        let defs = vec![
+            def_opencode(),
+            AgentDefinition {
+                id: "claude-code".into(),
+                kind: AgentKind::ClaudeCode,
+                display_name: "Claude Code".into(),
+                is_builtin: true,
+                rules: vec![AgentRule {
+                    exe_basename: Some("claude".into()),
+                    exe_path_contains: None,
+                    argv_contains: None,
+                    exclude_path_contains: None,
+                    require_shell_parent: false,
+                }],
+            },
+        ];
+
+        let agents = collect_detected_agents(
+            &[
+                snapshot_with_cpu(100, "/usr/bin/opencode", "opencode", &["opencode"], false, 0.1),
+                snapshot_with_cpu(200, "/usr/bin/claude", "claude", &["claude"], false, 20.0),
+            ],
+            &defs,
+        );
 
         assert_eq!(agents.len(), 2);
         assert_eq!(agents[0].pid, 100);
@@ -460,31 +567,57 @@ mod tests {
 
     #[test]
     fn collect_detected_agents_links_subprocess_to_parent() {
-        let agents = collect_detected_agents(&[
-            ProcessSnapshot {
-                pid: 100,
-                exe_path: "/usr/bin/claude".into(),
-                exe_basename: "claude".into(),
-                argv: vec!["claude".into()],
-                cwd: None,
-                is_thread: false,
-                cpu_usage: 0.0,
-                ppid: None,
-            },
-            ProcessSnapshot {
-                pid: 200,
-                exe_path: "/home/u/.local/share/claude/versions/2.1.139".into(),
-                exe_basename: "2.1.139".into(),
-                argv: vec![
-                    "/home/u/.local/share/claude/versions/2.1.139".into(),
-                    "--chrome-native-host".into(),
-                ],
-                cwd: None,
-                is_thread: false,
-                cpu_usage: 0.0,
-                ppid: Some(100),
-            },
-        ]);
+        let defs = vec![AgentDefinition {
+            id: "claude-code".into(),
+            kind: AgentKind::ClaudeCode,
+            display_name: "Claude Code".into(),
+            is_builtin: true,
+            rules: vec![
+                AgentRule {
+                    exe_basename: Some("claude".into()),
+                    exe_path_contains: None,
+                    argv_contains: None,
+                    exclude_path_contains: None,
+                    require_shell_parent: false,
+                },
+                AgentRule {
+                    exe_basename: None,
+                    exe_path_contains: Some("claude/versions/".into()),
+                    argv_contains: Some(vec!["--chrome-native-host".into()]),
+                    exclude_path_contains: None,
+                    require_shell_parent: false,
+                },
+            ],
+        }];
+
+        let agents = collect_detected_agents(
+            &[
+                ProcessSnapshot {
+                    pid: 100,
+                    exe_path: "/usr/bin/claude".into(),
+                    exe_basename: "claude".into(),
+                    argv: vec!["claude".into()],
+                    cwd: None,
+                    is_thread: false,
+                    cpu_usage: 0.0,
+                    ppid: None,
+                },
+                ProcessSnapshot {
+                    pid: 200,
+                    exe_path: "/home/u/.local/share/claude/versions/2.1.139".into(),
+                    exe_basename: "2.1.139".into(),
+                    argv: vec![
+                        "/home/u/.local/share/claude/versions/2.1.139".into(),
+                        "--chrome-native-host".into(),
+                    ],
+                    cwd: None,
+                    is_thread: false,
+                    cpu_usage: 0.0,
+                    ppid: Some(100),
+                },
+            ],
+            &defs,
+        );
 
         assert_eq!(agents.len(), 2);
         assert_eq!(agents[0].pid, 100);
@@ -495,16 +628,32 @@ mod tests {
 
     #[test]
     fn collect_detected_agents_parent_id_none_when_parent_not_detected() {
-        let agents = collect_detected_agents(&[ProcessSnapshot {
-            pid: 500,
-            exe_path: "/usr/bin/claude".into(),
-            exe_basename: "claude".into(),
-            argv: vec!["claude".into()],
-            cwd: None,
-            is_thread: false,
-            cpu_usage: 0.0,
-            ppid: Some(99999),
-        }]);
+        let defs = vec![AgentDefinition {
+            id: "claude-code".into(),
+            kind: AgentKind::ClaudeCode,
+            display_name: "Claude Code".into(),
+            is_builtin: true,
+            rules: vec![AgentRule {
+                exe_basename: Some("claude".into()),
+                exe_path_contains: None,
+                argv_contains: None,
+                exclude_path_contains: None,
+                require_shell_parent: false,
+            }],
+        }];
+        let agents = collect_detected_agents(
+            &[ProcessSnapshot {
+                pid: 500,
+                exe_path: "/usr/bin/claude".into(),
+                exe_basename: "claude".into(),
+                argv: vec!["claude".into()],
+                cwd: None,
+                is_thread: false,
+                cpu_usage: 0.0,
+                ppid: Some(99999),
+            }],
+            &defs,
+        );
 
         assert_eq!(agents.len(), 1);
         assert_eq!(agents[0].parent_id, None);
@@ -512,17 +661,21 @@ mod tests {
 
     #[test]
     fn collect_detected_agents_truncates_command_line() {
+        let defs = vec![def_opencode()];
         let long_arg = "x".repeat(250);
-        let agents = collect_detected_agents(&[ProcessSnapshot {
-            pid: 123,
-            exe_path: "/usr/bin/opencode".to_string(),
-            exe_basename: "opencode".to_string(),
-            argv: vec!["opencode".to_string(), long_arg],
-            cwd: None,
-            is_thread: false,
-            cpu_usage: 0.0,
-            ppid: None,
-        }]);
+        let agents = collect_detected_agents(
+            &[ProcessSnapshot {
+                pid: 123,
+                exe_path: "/usr/bin/opencode".to_string(),
+                exe_basename: "opencode".to_string(),
+                argv: vec!["opencode".to_string(), long_arg],
+                cwd: None,
+                is_thread: false,
+                cpu_usage: 0.0,
+                ppid: None,
+            }],
+            &defs,
+        );
 
         assert_eq!(agents.len(), 1);
         assert!(agents[0].command_line.ends_with('…'));

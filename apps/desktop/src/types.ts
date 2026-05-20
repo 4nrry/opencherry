@@ -76,12 +76,14 @@ export type AgentKind =
   | "gemini-cli"
   | "aider"
   | "copilot-cli"
+  | { custom: string }
   | "unknown";
 
-export type AgentStatus = "idle" | "generating";
+export type AgentStatus = "idle" | "generating" | "suspended" | "zombie";
 
 export interface DetectedAgent {
   id: string;
+  definition_id: string;
   kind: AgentKind;
   display_name: string;
   pid: number;

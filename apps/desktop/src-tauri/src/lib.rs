@@ -190,10 +190,60 @@ fn remove_custom_theme(app: tauri::AppHandle, id: String) -> Result<bool, String
 fn list_agents(app: tauri::AppHandle) -> Result<Vec<DetectedAgent>, String> {
     let dir = config_dir(&app)?;
     let repos = persist::list_repos(&dir).map_err(|e| e.to_string())?;
+    let defs = persist::list_agent_definitions(&dir).map_err(|e| e.to_string())?;
     Ok(opencherry_agents::correlate_agents_to_targets(
-        opencherry_agents::detect_running_agents(),
+        opencherry_agents::detect_running_agents(&defs),
         &repos,
     ))
+}
+
+#[tauri::command]
+fn list_agent_definitions(app: tauri::AppHandle) -> Result<Vec<opencherry_core::AgentDefinition>, String> {
+    let dir = config_dir(&app)?;
+    persist::list_agent_definitions(&dir).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn upsert_agent_definition(
+    app: tauri::AppHandle,
+    def: opencherry_core::AgentDefinition,
+) -> Result<(), String> {
+    let dir = config_dir(&app)?;
+    persist::upsert_agent_definition(&dir, &def).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn remove_agent_definition(app: tauri::AppHandle, id: String) -> Result<bool, String> {
+    let dir = config_dir(&app)?;
+    persist::remove_agent_definition(&dir, &id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn update_agent_name(app: tauri::AppHandle, id: String, name: String) -> Result<(), String> {
+    let dir = config_dir(&app)?;
+    let mut defs = persist::list_agent_definitions(&dir).map_err(|e| e.to_string())?;
+    if let Some(mut def) = defs.into_iter().find(|d| d.id == id) {
+        def.display_name = name.clone();
+        def.kind = opencherry_core::AgentKind::Custom(name);
+        persist::upsert_agent_definition(&dir, &def).map_err(|e| e.to_string())
+    } else {
+        Err(format!("agent definition '{id}' not found"))
+    }
+}
+
+#[tauri::command]
+fn sync_agent_rules(app: tauri::AppHandle, url: Option<String>) -> Result<usize, String> {
+    let dir = config_dir(&app)?;
+    let target_url = url.unwrap_or_else(|| {
+        "https://raw.githubusercontent.com/4nrry/opencherry/main/resources/default_agents.json"
+            .to_string()
+    });
+    persist::sync_agent_rules(&dir, &target_url).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn debug_list_processes() -> Result<serde_json::Value, String> {
+    Ok(opencherry_agents::debug_dump_processes())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -228,6 +278,12 @@ pub fn run() {
             publish_repo_branch,
             sync_repo_changes,
             list_agents,
+            list_agent_definitions,
+            upsert_agent_definition,
+            update_agent_name,
+            remove_agent_definition,
+            sync_agent_rules,
+            debug_list_processes,
             get_preferences,
             set_preferences,
             list_custom_themes,
@@ -236,10 +292,21 @@ pub fn run() {
         ])
         .setup(|app| {
             // Eagerly create config dir so first save doesn't race.
-            if let Ok(dir) = app.path().app_config_dir() {
-                let _ = std::fs::create_dir_all(&dir);
-                tracing::info!(path = %dir.display(), "config dir ready");
-            }
+            let dir = app.path().app_config_dir().expect("failed to resolve config dir");
+            let _ = std::fs::create_dir_all(&dir);
+            tracing::info!(path = %dir.display(), "config dir ready");
+
+            // Seed default rules if the database is empty or we have a local version.
+            // In a real app, this might be bundled.
+            let default_json = include_str!("../../../../resources/default_agents.json");
+            let _ = persist::seed_default_rules(&dir, default_json);
+
+            // Trigger background sync
+            let handle = app.handle().clone();
+            std::thread::spawn(move || {
+                let _ = sync_agent_rules(handle, None);
+            });
+
             Ok(())
         })
         .run(tauri::generate_context!())

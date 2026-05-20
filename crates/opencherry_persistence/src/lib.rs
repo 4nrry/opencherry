@@ -3,7 +3,7 @@
 //! SQLite-backed storage in the platform app config dir. A one-time import
 //! from the Sprint 1 `repos.json` keeps local development data intact.
 
-use opencherry_core::{Preferences, RepoId, RepoRef, Theme, TrackedTargetKind};
+use opencherry_core::{AgentDefinition, Preferences, RepoId, RepoRef, Theme, TrackedTargetKind};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -72,6 +72,23 @@ fn migrate(conn: &Connection) -> anyhow::Result<()> {
             json TEXT NOT NULL,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
+
+        CREATE TABLE IF NOT EXISTS agent_definitions (
+            id TEXT PRIMARY KEY NOT NULL,
+            kind_json TEXT NOT NULL,
+            display_name TEXT NOT NULL,
+            rules_json TEXT NOT NULL,
+            is_builtin INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TRIGGER IF NOT EXISTS agent_definitions_set_updated_at
+        AFTER UPDATE ON agent_definitions
+        FOR EACH ROW
+        BEGIN
+            UPDATE agent_definitions SET updated_at = CURRENT_TIMESTAMP WHERE id = OLD.id;
+        END;
         "#,
     )?;
 
@@ -294,6 +311,92 @@ pub fn remove_custom_theme(config_dir: &Path, id: &str) -> anyhow::Result<bool> 
 }
 
 // ---------------------------------------------------------------------------
+// Agent definitions
+// ---------------------------------------------------------------------------
+
+/// Return all agent definitions stored in the database.
+pub fn list_agent_definitions(config_dir: &Path) -> anyhow::Result<Vec<AgentDefinition>> {
+    let conn = open(config_dir)?;
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT id, kind_json, display_name, rules_json, is_builtin
+        FROM agent_definitions
+        ORDER BY is_builtin DESC, display_name COLLATE NOCASE
+        "#,
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, String>(3)?,
+            row.get::<_, i32>(4)? != 0,
+        ))
+    })?;
+
+    let mut defs = Vec::new();
+    for row in rows {
+        let (id, kind_json, display_name, rules_json, is_builtin) = row?;
+        defs.push(AgentDefinition {
+            id,
+            kind: serde_json::from_str(&kind_json)?,
+            display_name,
+            rules: serde_json::from_str(&rules_json)?,
+            is_builtin,
+        });
+    }
+    Ok(defs)
+}
+
+/// Insert or replace an agent definition.
+pub fn upsert_agent_definition(config_dir: &Path, def: &AgentDefinition) -> anyhow::Result<()> {
+    let conn = open(config_dir)?;
+    let kind_json = serde_json::to_string(&def.kind)?;
+    let rules_json = serde_json::to_string(&def.rules)?;
+    conn.execute(
+        r#"
+        INSERT INTO agent_definitions (id, kind_json, display_name, rules_json, is_builtin)
+        VALUES (?1, ?2, ?3, ?4, ?5)
+        ON CONFLICT(id) DO UPDATE SET 
+            kind_json = excluded.kind_json,
+            display_name = excluded.display_name,
+            rules_json = excluded.rules_json,
+            is_builtin = excluded.is_builtin
+        "#,
+        params![def.id, kind_json, def.display_name, rules_json, if def.is_builtin { 1 } else { 0 }],
+    )?;
+    Ok(())
+}
+
+/// Remove an agent definition by id.
+pub fn remove_agent_definition(config_dir: &Path, id: &str) -> anyhow::Result<bool> {
+    let conn = open(config_dir)?;
+    let changed = conn.execute("DELETE FROM agent_definitions WHERE id = ?1", params![id])?;
+    Ok(changed > 0)
+}
+
+/// Sync agent rules from a URL.
+pub fn sync_agent_rules(config_dir: &Path, url: &str) -> anyhow::Result<usize> {
+    let response = ureq::get(url).call()?;
+    let defs: Vec<AgentDefinition> = response.into_json()?;
+    let mut count = 0;
+    for def in defs {
+        upsert_agent_definition(config_dir, &def)?;
+        count += 1;
+    }
+    Ok(count)
+}
+
+/// Seed the database with default rules from a JSON string.
+pub fn seed_default_rules(config_dir: &Path, json: &str) -> anyhow::Result<()> {
+    let defs: Vec<AgentDefinition> = serde_json::from_str(json)?;
+    for def in defs {
+        upsert_agent_definition(config_dir, &def)?;
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -314,6 +417,7 @@ fn parse_kind(kind: &str) -> TrackedTargetKind {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use opencherry_core::{AgentKind, AgentRule};
     use std::{
         fs,
         path::{Path, PathBuf},
@@ -777,5 +881,36 @@ mod tests {
             .iter()
             .any(|repo| repo.display_name == "workspace-group"
                 && repo.kind == TrackedTargetKind::Group));
+    }
+
+    #[test]
+    fn add_list_and_remove_agent_definitions() {
+        let dir = TestDir::new("persistence-agents");
+        let config = dir.path();
+
+        let def = AgentDefinition {
+            id: "test-agent".into(),
+            kind: AgentKind::Custom("Test".into()),
+            display_name: "Test Agent".into(),
+            is_builtin: false,
+            rules: vec![AgentRule {
+                exe_basename: Some("test".into()),
+                exe_path_contains: None,
+                argv_contains: None,
+                exclude_path_contains: None,
+                require_shell_parent: true,
+            }],
+        };
+
+        upsert_agent_definition(config, &def).unwrap();
+        let list = list_agent_definitions(config).unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].id, "test-agent");
+        assert_eq!(list[0].rules.len(), 1);
+        assert!(list[0].rules[0].require_shell_parent);
+
+        remove_agent_definition(config, "test-agent").unwrap();
+        let list = list_agent_definitions(config).unwrap();
+        assert_eq!(list.len(), 0);
     }
 }
