@@ -280,7 +280,12 @@ export default function App() {
 
         <AgentsPanel 
           agents={agents} 
-          onSync={async () => { await syncAgentRules(); await refetchAgents(); }} 
+          onSync={async () => { 
+            await syncAgentRules(); 
+            // Give the DB a split second to settle before scanning processes
+            await new Promise(r => setTimeout(r, 100));
+            await refetchAgents(); 
+          }} 
           onRename={async () => { await refetchAgents(); }}
           onEditStateChange={setIsEditingAny}
         />

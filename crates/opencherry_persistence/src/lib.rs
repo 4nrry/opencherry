@@ -351,6 +351,37 @@ pub fn list_agent_definitions(config_dir: &Path) -> anyhow::Result<Vec<AgentDefi
 /// Insert or replace an agent definition.
 pub fn upsert_agent_definition(config_dir: &Path, def: &AgentDefinition) -> anyhow::Result<()> {
     let conn = open(config_dir)?;
+    upsert_agent_definition_with_conn(&conn, def)
+}
+
+/// Sync agent rules from a URL.
+pub fn sync_agent_rules(config_dir: &Path, url: &str) -> anyhow::Result<usize> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)?
+        .as_secs();
+    let target = if url.contains('?') {
+        format!("{}&v={}", url, now)
+    } else {
+        format!("{}?v={}", url, now)
+    };
+
+    tracing::info!("Syncing agent rules from {}", target);
+    let response = ureq::get(&target).call()?;
+    let new_defs: Vec<AgentDefinition> = response.into_json()?;
+    tracing::info!("Fetched {} definitions from remote", new_defs.len());
+    
+    let conn = open(config_dir)?;
+    let mut count = 0;
+    for def in new_defs {
+        tracing::debug!("Upserting definition: {}", def.id);
+        upsert_agent_definition_with_conn(&conn, &def)?;
+        count += 1;
+    }
+    tracing::info!("Successfully synced {} definitions", count);
+    Ok(count)
+}
+
+fn upsert_agent_definition_with_conn(conn: &Connection, def: &AgentDefinition) -> anyhow::Result<()> {
     let kind_json = serde_json::to_string(&def.kind)?;
     let rules_json = serde_json::to_string(&def.rules)?;
     conn.execute(
@@ -375,17 +406,6 @@ pub fn remove_agent_definition(config_dir: &Path, id: &str) -> anyhow::Result<bo
     Ok(changed > 0)
 }
 
-/// Sync agent rules from a URL.
-pub fn sync_agent_rules(config_dir: &Path, url: &str) -> anyhow::Result<usize> {
-    let response = ureq::get(url).call()?;
-    let defs: Vec<AgentDefinition> = response.into_json()?;
-    let mut count = 0;
-    for def in defs {
-        upsert_agent_definition(config_dir, &def)?;
-        count += 1;
-    }
-    Ok(count)
-}
 
 /// Seed the database with default rules from a JSON string.
 pub fn seed_default_rules(config_dir: &Path, json: &str) -> anyhow::Result<()> {

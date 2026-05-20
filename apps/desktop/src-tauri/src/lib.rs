@@ -235,8 +235,8 @@ fn update_agent_name(app: tauri::AppHandle, id: String, name: String) -> Result<
 fn sync_agent_rules(app: tauri::AppHandle, url: Option<String>) -> Result<usize, String> {
     let dir = config_dir(&app)?;
     let target_url = url.unwrap_or_else(|| {
-        "https://raw.githubusercontent.com/4nrry/opencherry/main/resources/default_agents.json"
-            .to_string()
+        const SYNC_URL: &str = "https://raw.githubusercontent.com/4nrry/opencherry/feature/dynamic-agent-registry/resources/default_agents.json";
+        SYNC_URL.to_string()
     });
     persist::sync_agent_rules(&dir, &target_url).map_err(|e| e.to_string())
 }
