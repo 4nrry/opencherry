@@ -154,11 +154,16 @@ impl AgentKind {
 /// A rule used to detect a running agent process.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AgentRule {
+    #[serde(default)]
     pub exe_basename: Option<String>,
+    #[serde(default)]
     pub exe_path_contains: Option<String>,
+    #[serde(default)]
     pub argv_contains: Option<Vec<String>>,
-    pub exclude_path_contains: Option<Option<String>>,
+    #[serde(default)]
+    pub exclude_path_contains: Option<String>,
     /// If true, the process's parent must be a known interactive shell.
+    #[serde(default)]
     pub require_shell_parent: bool,
 }
 
@@ -170,6 +175,7 @@ pub struct AgentDefinition {
     pub display_name: String,
     pub rules: Vec<AgentRule>,
     /// If true, this is a built-in rule that can be updated via sync.
+    #[serde(default)]
     pub is_builtin: bool,
 }
 

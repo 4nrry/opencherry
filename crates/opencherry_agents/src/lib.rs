@@ -151,7 +151,7 @@ fn matches_rule(
     }
 
     // 4. Exclude path contains
-    if let Some(Some(ref target)) = rule.exclude_path_contains {
+    if let Some(ref target) = rule.exclude_path_contains {
         if process
             .exe_path
             .to_ascii_lowercase()
