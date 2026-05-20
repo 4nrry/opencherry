@@ -40,7 +40,7 @@
   {
     "id": "antigravity-cli",
     "kind": { "custom": "Antigravity CLI" },
-    "display_name": "Antigravity CLI (Synced! 🚀)",
+    "display_name": "Antigravity CLI (Final Test! 🛰️)",
     "is_builtin": true,
     "rules": [
       {
