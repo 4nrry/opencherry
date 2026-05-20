@@ -1,0 +1,87 @@
+---
+---
+
+<div id="install" class="py-16 px-4 max-w-4xl mx-auto relative z-10">
+  <div class="border-t border-obsidian-border pt-16">
+    <div class="text-center mb-12">
+      <h2 class="text-2xl sm:text-3xl font-extrabold text-white tracking-tight mb-4">
+        Guia de Instalação 📦
+      </h2>
+      <p class="text-zinc-400 max-w-xl mx-auto text-sm leading-relaxed">
+        O OpenCherry roda localmente e não requer sandboxing, permitindo que ele orquestre agentes CLI instalados na sua máquina sem atritos.
+      </p>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 font-mono text-xs">
+      
+      <!-- Option 1: Debian/Ubuntu (Primary) -->
+      <div class="bg-obsidian-light border border-obsidian-border rounded-xl p-5 flex flex-col justify-between hover:border-zinc-800 transition-colors">
+        <div>
+          <div class="flex items-center justify-between mb-4">
+            <span class="text-white font-bold text-sm">Ubuntu / Debian (.deb)</span>
+            <span class="px-2 py-0.5 bg-cherry/10 text-cherry text-[10px] rounded border border-cherry/20 font-bold">RECOMENDADO</span>
+          </div>
+          <p class="text-zinc-500 mb-6 font-sans leading-relaxed text-xs">
+            Baixe o pacote compilado nativo. Ao utilizar o <code class="text-zinc-300">apt</code> com caminho absoluto, todas as dependências do sistema serão resolvidas automaticamente.
+          </p>
+          
+          <div class="bg-obsidian border border-obsidian-border rounded-lg p-3 space-y-2 text-[11px] leading-relaxed relative">
+            <div class="text-zinc-600"># Instale usando o apt informando o caminho do .deb</div>
+            <div class="text-zinc-300 flex items-center justify-between">
+              <span class="select-all">sudo apt install "$(pwd)/OpenCherry_0.0.1_amd64.deb"</span>
+              <button 
+                onclick="navigator.clipboard.writeText('sudo apt install \"$(pwd)/OpenCherry_0.0.1_amd64.deb\"')"
+                class="hover:text-cherry text-zinc-600 transition-colors pl-2"
+                title="Copiar comando"
+              >
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div>
+        
+        <div class="mt-8 flex items-center justify-between text-[10px] text-zinc-500">
+          <span>Tamanho: ~12MB</span>
+          <span>GNOME & Yaru ready</span>
+        </div>
+      </div>
+
+      <!-- Option 2: Build from Source -->
+      <div class="bg-obsidian-light border border-obsidian-border rounded-xl p-5 flex flex-col justify-between hover:border-zinc-800 transition-colors">
+        <div>
+          <div class="flex items-center justify-between mb-4">
+            <span class="text-white font-bold text-sm">Compilar da Origem (SaaS/Multis)</span>
+            <span class="px-2 py-0.5 bg-zinc-800 text-zinc-400 text-[10px] rounded border border-zinc-700">CARGO + PNPM</span>
+          </div>
+          <p class="text-zinc-500 mb-6 font-sans leading-relaxed text-xs">
+            Clone o repositório e compile o projeto utilizando a sua toolchain Rust estável e gerenciador de pacotes pnpm.
+          </p>
+          
+          <div class="bg-obsidian border border-obsidian-border rounded-lg p-3 space-y-2 text-[11px] leading-relaxed">
+            <div class="text-zinc-600"># Instale dependências e execute o app Tauri 2</div>
+            <div class="text-zinc-300 flex items-center justify-between">
+              <span class="select-all">pnpm -C apps/desktop install && pnpm -C apps/desktop tauri dev</span>
+              <button 
+                onclick="navigator.clipboard.writeText('pnpm -C apps/desktop install && pnpm -C apps/desktop tauri dev')"
+                class="hover:text-cherry text-zinc-600 transition-colors pl-2"
+                title="Copiar comando"
+              >
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div>
+        
+        <div class="mt-8 flex items-center justify-between text-[10px] text-zinc-500">
+          <span>Prerrequisitos: Rust + Node.js 20+</span>
+          <span>Multi-plataforma</span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>

@@ -1,0 +1,53 @@
+---
+import Layout from '../layouts/Layout.astro';
+import Hero from '../components/Hero.astro';
+import InteractiveDemo from '../components/InteractiveDemo.tsx';
+import InstallGuide from '../components/InstallGuide.astro';
+---
+
+<Layout title="OpenCherry 🍒 | AI-Assisted Coding Multi-Agent Control Tower">
+	<!-- Top Bar -->
+	<header class="border-b border-obsidian-border bg-obsidian-light/40 backdrop-blur-md sticky top-0 z-50">
+		<div class="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
+			<a href="/" class="flex items-center gap-2 group">
+				<img src="/logo.png" alt="OpenCherry" class="h-6 w-6 rounded-full group-hover:scale-105 transition-transform" />
+				<span class="font-bold text-white font-mono text-sm tracking-tight">opencherry<span class="text-cherry">.dev</span></span>
+			</a>
+			
+			<div class="flex items-center gap-4 text-xs font-mono">
+				<a href="#install" class="text-zinc-400 hover:text-white transition-colors">Install</a>
+				<a href="https://github.com/4nrry/opencherry" target="_blank" rel="noopener noreferrer" class="px-3 py-1.5 bg-zinc-900 border border-zinc-800 text-zinc-300 rounded hover:bg-zinc-800 hover:text-white transition-all">
+					GitHub
+				</a>
+			</div>
+		</div>
+	</header>
+
+	<main class="flex-1">
+		<!-- Hero Section -->
+		<Hero />
+
+		<!-- Interactive Console/App Simulation (Hydrated SolidJS Island) -->
+		<section class="px-4 pb-20">
+			<div class="max-w-5xl mx-auto">
+				<div class="text-center mb-8">
+					<span class="px-2.5 py-1 bg-cherry/10 text-cherry border border-cherry/20 text-[10px] font-bold font-mono tracking-wider uppercase rounded-full">Interactive Shell Demo</span>
+					<h3 class="text-xl sm:text-2xl font-extrabold text-white mt-3 mb-2 tracking-tight">Veja o OpenCherry em Ação</h3>
+					<p class="text-zinc-400 text-xs sm:text-sm font-sans max-w-lg mx-auto">Interaja com os workspaces no menu esquerdo e observe as IAs trabalharem cooperativamente em segundo plano.</p>
+				</div>
+				<InteractiveDemo client:load />
+			</div>
+		</section>
+
+		<!-- Install Guide Section -->
+		<InstallGuide />
+	</main>
+
+	<!-- Footer -->
+	<footer class="border-t border-obsidian-border bg-obsidian py-8 px-4 text-center text-xs font-mono text-zinc-500 z-10 relative">
+		<div class="max-w-5xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
+			<p>opencherry © 2026. Distribuído sob licença AGPL-3.0.</p>
+			<p>Construído com <span class="text-cherry">🍒</span>, Astro & SolidJS.</p>
+		</div>
+	</footer>
+</Layout>

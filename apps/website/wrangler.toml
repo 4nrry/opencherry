@@ -1,0 +1,7 @@
+name = "opencherry"
+compatibility_date = "2026-05-20"
+account_id = "0ccff702fc99fc5e354e9f9008303490"
+
+[assets]
+directory = "./dist"
+not_found_handling = "404-page"

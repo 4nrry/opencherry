@@ -1,0 +1,35 @@
+@import "tailwindcss";
+
+@theme {
+  --color-cherry: #D2143A;
+  --color-cherry-glow: rgba(210, 20, 58, 0.15);
+  --color-obsidian: #09090B;
+  --color-obsidian-light: #121214;
+  --color-obsidian-card: #18181B;
+  --color-obsidian-border: #27272A;
+  --font-mono: 'JetBrains Mono', 'Fira Code', 'Courier New', Courier, monospace;
+}
+
+@layer base {
+  body {
+    background-color: var(--color-obsidian);
+    color: #E4E4E7;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+  }
+}
+
+/* Custom terminal scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #09090B;
+}
+::-webkit-scrollbar-thumb {
+  background: #27272A;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3F3F46;
+}
