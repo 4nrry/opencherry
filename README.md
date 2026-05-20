@@ -1,5 +1,7 @@
 # OpenCherry 🍒
 
+<img width="2952" height="1808" alt="image" src="https://github.com/user-attachments/assets/5bb79d23-9413-4b8f-a5c9-ed159d600e9f" />
+
 > Ubuntu/GNOME-first multi-repo × multi-agent control tower for AI-assisted coding.
 
 OpenCherry is an open source desktop app that lets you orchestrate many Git
