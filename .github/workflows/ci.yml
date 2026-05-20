@@ -127,6 +127,9 @@ jobs:
       - name: Install JS dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Install e2e dependencies
+        run: pnpm --dir e2e install --frozen-lockfile
+
       - name: Install tauri-driver
         run: cargo install tauri-driver --locked
 
