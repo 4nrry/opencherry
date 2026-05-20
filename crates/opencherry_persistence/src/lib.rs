@@ -73,22 +73,8 @@ fn migrate(conn: &Connection) -> anyhow::Result<()> {
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
 
-        CREATE TABLE IF NOT EXISTS agent_definitions (
-            id TEXT PRIMARY KEY NOT NULL,
-            kind_json TEXT NOT NULL,
-            display_name TEXT NOT NULL,
-            rules_json TEXT NOT NULL,
-            is_builtin INTEGER NOT NULL DEFAULT 0,
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-        );
-
-        CREATE TRIGGER IF NOT EXISTS agent_definitions_set_updated_at
-        AFTER UPDATE ON agent_definitions
-        FOR EACH ROW
-        BEGIN
-            UPDATE agent_definitions SET updated_at = CURRENT_TIMESTAMP WHERE id = OLD.id;
-        END;
+        DROP TABLE IF EXISTS agent_definitions;
+        DROP TRIGGER IF EXISTS agent_definitions_set_updated_at;
         "#,
     )?;
 
@@ -314,114 +300,122 @@ pub fn remove_custom_theme(config_dir: &Path, id: &str) -> anyhow::Result<bool> 
 // Agent definitions
 // ---------------------------------------------------------------------------
 
-/// Return all agent definitions stored in the database.
-pub fn list_agent_definitions(config_dir: &Path) -> anyhow::Result<Vec<AgentDefinition>> {
-    let conn = open(config_dir)?;
-    let mut stmt = conn.prepare(
-        r#"
-        SELECT id, kind_json, display_name, rules_json, is_builtin
-        FROM agent_definitions
-        ORDER BY is_builtin DESC, display_name COLLATE NOCASE
-        "#,
-    )?;
-    let rows = stmt.query_map([], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, String>(1)?,
-            row.get::<_, String>(2)?,
-            row.get::<_, String>(3)?,
-            row.get::<_, i32>(4)? != 0,
-        ))
-    })?;
+const DEFAULT_AGENTS_JSON: &str = include_str!("../../../resources/default_agents.json");
 
-    let mut defs = Vec::new();
-    for row in rows {
-        let (id, kind_json, display_name, rules_json, is_builtin) = row?;
-        defs.push(AgentDefinition {
-            id,
-            kind: serde_json::from_str(&kind_json)?,
-            display_name,
-            rules: serde_json::from_str(&rules_json)?,
-            is_builtin,
-        });
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct UserConfigSchema {
+    agents: Option<Vec<AgentDefinition>>,
+}
+
+fn resolve_config_file_path(config_dir: &Path) -> PathBuf {
+    if cfg!(test) {
+        config_dir.join("opencherry.json")
+    } else {
+        dirs::home_dir()
+            .map(|h| h.join(".opencherry").join("opencherry.json"))
+            .unwrap_or_else(|| config_dir.join("opencherry.json"))
     }
+}
+
+fn load_user_config(config_dir: &Path) -> (PathBuf, UserConfigSchema) {
+    let path = resolve_config_file_path(config_dir);
+    if !path.exists() {
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        return (
+            path,
+            UserConfigSchema {
+                agents: Some(Vec::new()),
+            },
+        );
+    }
+
+    let content = match std::fs::read_to_string(&path) {
+        Ok(c) => c,
+        Err(_) => {
+            return (
+                path,
+                UserConfigSchema {
+                    agents: Some(Vec::new()),
+                },
+            )
+        }
+    };
+
+    let schema = serde_json::from_str(&content).unwrap_or_else(|_| UserConfigSchema {
+        agents: Some(Vec::new()),
+    });
+    (path, schema)
+}
+
+fn save_user_config(path: &Path, schema: &UserConfigSchema) -> anyhow::Result<()> {
+    let content = serde_json::to_string_pretty(schema)?;
+    std::fs::write(path, content)?;
+    Ok(())
+}
+
+/// Return all agent definitions merged from default embedded and local overrides.
+pub fn list_agent_definitions(config_dir: &Path) -> anyhow::Result<Vec<AgentDefinition>> {
+    // 1. Parse built-in rules embedded at compile-time
+    let mut defs: Vec<AgentDefinition> = serde_json::from_str(DEFAULT_AGENTS_JSON)?;
+    for d in &mut defs {
+        d.is_builtin = true;
+    }
+
+    // 2. Load and merge user-defined rules from ~/.opencherry/opencherry.json
+    let (_, schema) = load_user_config(config_dir);
+    if let Some(custom_agents) = schema.agents {
+        for mut custom in custom_agents {
+            custom.is_builtin = false;
+            // Overwrite existing or append
+            if let Some(pos) = defs.iter().position(|d| d.id == custom.id) {
+                defs[pos] = custom;
+            } else {
+                defs.push(custom);
+            }
+        }
+    }
+
+    // Stable sort
+    defs.sort_by(|a, b| {
+        b.is_builtin.cmp(&a.is_builtin).then_with(|| {
+            a.display_name
+                .to_lowercase()
+                .cmp(&b.display_name.to_lowercase())
+        })
+    });
     Ok(defs)
 }
 
-/// Insert or replace an agent definition.
+/// Insert or replace an agent definition inside user's opencherry.json file.
 pub fn upsert_agent_definition(config_dir: &Path, def: &AgentDefinition) -> anyhow::Result<()> {
-    let conn = open(config_dir)?;
-    upsert_agent_definition_with_conn(&conn, def)
-}
+    let (path, mut schema) = load_user_config(config_dir);
+    let mut agents = schema.agents.unwrap_or_default();
 
-/// Sync agent rules from a URL.
-pub fn sync_agent_rules(config_dir: &Path, url: &str) -> anyhow::Result<usize> {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)?
-        .as_secs();
-    let target = if url.contains('?') {
-        format!("{}&v={}", url, now)
+    if let Some(pos) = agents.iter().position(|a| a.id == def.id) {
+        agents[pos] = def.clone();
     } else {
-        format!("{}?v={}", url, now)
-    };
-
-    tracing::info!("Syncing agent rules from {}", target);
-    let response = ureq::get(&target).call()?;
-    let new_defs: Vec<AgentDefinition> = response.into_json()?;
-    tracing::info!("Fetched {} definitions from remote", new_defs.len());
-
-    let conn = open(config_dir)?;
-    let mut count = 0;
-    for def in new_defs {
-        tracing::debug!("Upserting definition: {}", def.id);
-        upsert_agent_definition_with_conn(&conn, &def)?;
-        count += 1;
+        agents.push(def.clone());
     }
-    tracing::info!("Successfully synced {} definitions", count);
-    Ok(count)
-}
 
-fn upsert_agent_definition_with_conn(
-    conn: &Connection,
-    def: &AgentDefinition,
-) -> anyhow::Result<()> {
-    let kind_json = serde_json::to_string(&def.kind)?;
-    let rules_json = serde_json::to_string(&def.rules)?;
-    conn.execute(
-        r#"
-        INSERT INTO agent_definitions (id, kind_json, display_name, rules_json, is_builtin)
-        VALUES (?1, ?2, ?3, ?4, ?5)
-        ON CONFLICT(id) DO UPDATE SET 
-            kind_json = excluded.kind_json,
-            display_name = excluded.display_name,
-            rules_json = excluded.rules_json,
-            is_builtin = excluded.is_builtin
-        "#,
-        params![
-            def.id,
-            kind_json,
-            def.display_name,
-            rules_json,
-            if def.is_builtin { 1 } else { 0 }
-        ],
-    )?;
+    schema.agents = Some(agents);
+    save_user_config(&path, &schema)?;
     Ok(())
 }
 
-/// Remove an agent definition by id.
+/// Remove an agent definition by id from user's opencherry.json file.
 pub fn remove_agent_definition(config_dir: &Path, id: &str) -> anyhow::Result<bool> {
-    let conn = open(config_dir)?;
-    let changed = conn.execute("DELETE FROM agent_definitions WHERE id = ?1", params![id])?;
-    Ok(changed > 0)
-}
+    let (path, mut schema) = load_user_config(config_dir);
+    let mut agents = schema.agents.unwrap_or_default();
 
-/// Seed the database with default rules from a JSON string.
-pub fn seed_default_rules(config_dir: &Path, json: &str) -> anyhow::Result<()> {
-    let defs: Vec<AgentDefinition> = serde_json::from_str(json)?;
-    for def in defs {
-        upsert_agent_definition(config_dir, &def)?;
-    }
-    Ok(())
+    let original_len = agents.len();
+    agents.retain(|a| a.id != id);
+    let changed = agents.len() != original_len;
+
+    schema.agents = Some(agents);
+    save_user_config(&path, &schema)?;
+    Ok(changed)
 }
 
 // ---------------------------------------------------------------------------
@@ -916,6 +910,8 @@ mod tests {
         let dir = TestDir::new("persistence-agents");
         let config = dir.path();
 
+        let initial_len = list_agent_definitions(config).unwrap().len();
+
         let def = AgentDefinition {
             id: "test-agent".into(),
             kind: AgentKind::Custom("Test".into()),
@@ -932,13 +928,13 @@ mod tests {
 
         upsert_agent_definition(config, &def).unwrap();
         let list = list_agent_definitions(config).unwrap();
-        assert_eq!(list.len(), 1);
-        assert_eq!(list[0].id, "test-agent");
-        assert_eq!(list[0].rules.len(), 1);
-        assert!(list[0].rules[0].require_shell_parent);
+        assert_eq!(list.len(), initial_len + 1);
+        let added = list.iter().find(|a| a.id == "test-agent").unwrap();
+        assert_eq!(added.rules.len(), 1);
+        assert!(added.rules[0].require_shell_parent);
 
         remove_agent_definition(config, "test-agent").unwrap();
         let list = list_agent_definitions(config).unwrap();
-        assert_eq!(list.len(), 0);
+        assert_eq!(list.len(), initial_len);
     }
 }

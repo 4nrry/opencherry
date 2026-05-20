@@ -78,25 +78,11 @@ fn main() {
         // Ensure config dir exists
         let _ = std::fs::create_dir_all(&config_dir);
 
-        // Seed if empty
-        if let Ok(defs) = persist::list_agent_definitions(&config_dir) {
-            if defs.is_empty() {
-                let default_json = include_str!("../../../../resources/default_agents.json");
-                let _ = persist::seed_default_rules(&config_dir, default_json);
-            }
-        }
-
         match command {
             Commands::Agent { action } => match action {
-                AgentAction::Sync { url } => {
-                    let target_url = url.unwrap_or_else(|| {
-                        "https://raw.githubusercontent.com/4nrry/opencherry/main/resources/default_agents.json"
-                            .to_string()
-                    });
-                    match persist::sync_agent_rules(&config_dir, &target_url) {
-                        Ok(n) => println!("Successfully synced {} agent rules.", n),
-                        Err(e) => eprintln!("Error syncing rules: {}", e),
-                    }
+                AgentAction::Sync { .. } => {
+                    println!("Sync is obsolete as OpenCherry is now 100% offline-first.");
+                    println!("Built-in rules are embedded inside the binary. Custom rules can be added to ~/.opencherry/opencherry.json");
                 }
                 AgentAction::List => match persist::list_agent_definitions(&config_dir) {
                     Ok(defs) => {

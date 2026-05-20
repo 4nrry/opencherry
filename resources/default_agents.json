@@ -54,19 +54,14 @@
     ]
   },
   {
-    "id": "aider",
-    "kind": "aider",
-    "display_name": "Aider",
+    "id": "opencode",
+    "kind": "open-code",
+    "display_name": "OpenCode",
     "is_builtin": true,
     "rules": [
       {
-        "exe_basename": "aider",
-        "require_shell_parent": true
-      },
-      {
-        "exe_basename": "python3",
-        "argv_contains": ["aider"],
-        "require_shell_parent": true
+        "exe_basename": "opencode",
+        "require_shell_parent": false
       }
     ]
   }

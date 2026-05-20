@@ -234,13 +234,10 @@ fn update_agent_name(app: tauri::AppHandle, id: String, name: String) -> Result<
 }
 
 #[tauri::command]
-fn sync_agent_rules(app: tauri::AppHandle, url: Option<String>) -> Result<usize, String> {
+fn sync_agent_rules(app: tauri::AppHandle, _url: Option<String>) -> Result<usize, String> {
     let dir = config_dir(&app)?;
-    let target_url = url.unwrap_or_else(|| {
-        const SYNC_URL: &str = "https://raw.githubusercontent.com/4nrry/opencherry/feature/dynamic-agent-registry/resources/default_agents.json";
-        SYNC_URL.to_string()
-    });
-    persist::sync_agent_rules(&dir, &target_url).map_err(|e| e.to_string())
+    let defs = persist::list_agent_definitions(&dir).map_err(|e| e.to_string())?;
+    Ok(defs.len())
 }
 
 #[tauri::command]
@@ -300,17 +297,6 @@ pub fn run() {
                 .expect("failed to resolve config dir");
             let _ = std::fs::create_dir_all(&dir);
             tracing::info!(path = %dir.display(), "config dir ready");
-
-            // Seed default rules if the database is empty or we have a local version.
-            // In a real app, this might be bundled.
-            let default_json = include_str!("../../../../resources/default_agents.json");
-            let _ = persist::seed_default_rules(&dir, default_json);
-
-            // Trigger background sync
-            let handle = app.handle().clone();
-            std::thread::spawn(move || {
-                let _ = sync_agent_rules(handle, None);
-            });
 
             Ok(())
         })
