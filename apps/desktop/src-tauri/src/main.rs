@@ -74,7 +74,7 @@ fn main() {
         let config_dir = dirs::config_dir()
             .expect("could not find config dir")
             .join("ai.opencherry.desktop");
-        
+
         // Ensure config dir exists
         let _ = std::fs::create_dir_all(&config_dir);
 
@@ -118,10 +118,14 @@ fn main() {
                     for agent in agents {
                         println!(
                             "[{:?}] {} (PID: {}){} - {}",
-                            agent.status, 
-                            agent.display_name, 
+                            agent.status,
+                            agent.display_name,
                             agent.pid,
-                            if let Some(ref p) = agent.parent_id { format!(" [Child of {}]", p.0) } else { "".to_string() },
+                            if let Some(ref p) = agent.parent_id {
+                                format!(" [Child of {}]", p.0)
+                            } else {
+                                "".to_string()
+                            },
                             agent.command_line
                         );
                     }
@@ -130,7 +134,12 @@ fn main() {
                     let raw = opencherry_agents::debug_dump_processes();
                     println!("{}", serde_json::to_string_pretty(&raw).unwrap());
                 }
-                AgentAction::Add { id, name, exe, shell } => {
+                AgentAction::Add {
+                    id,
+                    name,
+                    exe,
+                    shell,
+                } => {
                     let def = opencherry_core::AgentDefinition {
                         id: id.clone(),
                         kind: opencherry_core::AgentKind::Custom(name.clone()),
@@ -150,7 +159,12 @@ fn main() {
                         println!("Agent '{}' added successfully.", id);
                     }
                 }
-                AgentAction::Update { id, name, exe, shell } => {
+                AgentAction::Update {
+                    id,
+                    name,
+                    exe,
+                    shell,
+                } => {
                     // Load existing
                     let defs = persist::list_agent_definitions(&config_dir).unwrap_or_default();
                     if let Some(mut def) = defs.into_iter().find(|d| d.id == id) {

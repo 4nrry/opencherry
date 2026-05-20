@@ -122,15 +122,20 @@ fn matches_rule(
 ) -> bool {
     // 1. Exe basename match
     if let Some(ref target) = rule.exe_basename {
-        if process.exe_basename.to_ascii_lowercase() != target.to_ascii_lowercase() 
-            && process.process_name.to_ascii_lowercase() != target.to_ascii_lowercase() {
+        if !process.exe_basename.eq_ignore_ascii_case(target)
+            && !process.process_name.eq_ignore_ascii_case(target)
+        {
             return false;
         }
     }
 
     // 2. Exe path contains
     if let Some(ref target) = rule.exe_path_contains {
-        if !process.exe_path.to_ascii_lowercase().contains(&target.to_ascii_lowercase()) {
+        if !process
+            .exe_path
+            .to_ascii_lowercase()
+            .contains(&target.to_ascii_lowercase())
+        {
             return false;
         }
     }
@@ -147,7 +152,11 @@ fn matches_rule(
 
     // 4. Exclude path contains
     if let Some(Some(ref target)) = rule.exclude_path_contains {
-        if process.exe_path.to_ascii_lowercase().contains(&target.to_ascii_lowercase()) {
+        if process
+            .exe_path
+            .to_ascii_lowercase()
+            .contains(&target.to_ascii_lowercase())
+        {
             return false;
         }
     }
@@ -224,20 +233,27 @@ pub fn debug_dump_processes() -> serde_json::Value {
         RefreshKind::new().with_processes(ProcessRefreshKind::everything()),
     );
     sys.refresh_processes(ProcessesToUpdate::All, true);
-    
-    let list: Vec<serde_json::Value> = sys.processes().iter().map(|(pid, p)| {
-        serde_json::json!({
-            "pid": pid.as_u32(),
-            "name": p.name(),
-            "exe": p.exe().map(|path| path.to_string_lossy()),
-            "ppid": p.parent().map(|id| id.as_u32()),
-            "cmd": p.cmd()
+
+    let list: Vec<serde_json::Value> = sys
+        .processes()
+        .iter()
+        .map(|(pid, p)| {
+            serde_json::json!({
+                "pid": pid.as_u32(),
+                "name": p.name(),
+                "exe": p.exe().map(|path| path.to_string_lossy()),
+                "ppid": p.parent().map(|id| id.as_u32()),
+                "cmd": p.cmd()
+            })
         })
-    }).collect();
+        .collect();
     serde_json::json!(list)
 }
 
-pub fn correlate_agents_to_targets(agents: Vec<DetectedAgent>, targets: &[RepoRef]) -> Vec<DetectedAgent> {
+pub fn correlate_agents_to_targets(
+    agents: Vec<DetectedAgent>,
+    targets: &[RepoRef],
+) -> Vec<DetectedAgent> {
     agents
         .into_iter()
         .map(|mut agent| {
@@ -283,7 +299,7 @@ fn collect_detected_agents(
     definitions: &[AgentDefinition],
 ) -> Vec<DetectedAgent> {
     let mut out = Vec::new();
-    
+
     // First pass: identify all agents
     for proc in processes {
         if proc.is_thread {
@@ -291,6 +307,10 @@ fn collect_detected_agents(
         }
         if let Some(kind) = classify(proc, processes, definitions) {
             let def = definitions.iter().find(|d| d.kind == kind).unwrap();
+            let mut command_line = proc.argv.join(" ");
+            if command_line.chars().count() > 200 {
+                command_line = command_line.chars().take(200).collect::<String>() + "…";
+            }
             out.push(DetectedAgent {
                 id: AgentId(proc.pid.to_string()),
                 definition_id: def.id.clone(),
@@ -298,7 +318,7 @@ fn collect_detected_agents(
                 display_name: def.display_name.clone(),
                 pid: proc.pid,
                 cwd: proc.cwd.clone(),
-                command_line: proc.argv.join(" "),
+                command_line,
                 targets: AgentTargetMatches::default(),
                 status: classify_status(proc.cpu_usage, proc.os_status),
                 parent_id: None, // Will populate in second pass
@@ -308,20 +328,20 @@ fn collect_detected_agents(
 
     // Second pass: link parent/child relationships
     let agent_pids: std::collections::HashSet<u32> = out.iter().map(|a| a.pid).collect();
-    for i in 0..out.len() {
-        let pid = out[i].pid;
+    for agent in &mut out {
+        let pid = agent.pid;
         let ppid = processes.iter().find(|p| p.pid == pid).and_then(|p| p.ppid);
-        
+
         if let Some(ppid) = ppid {
             // Only link direct parent/child relationships
             if agent_pids.contains(&ppid) {
-                out[i].parent_id = Some(AgentId(ppid.to_string()));
+                agent.parent_id = Some(AgentId(ppid.to_string()));
             }
         }
     }
 
     // Stable sort by PID
-    out.sort_by(|a, b| a.pid.cmp(&b.pid));
+    out.sort_by_key(|a| a.pid);
 
     out
 }
@@ -404,7 +424,10 @@ mod tests {
     fn classify_matches_by_exe_basename() {
         let defs = vec![def_opencode()];
         let proc = snapshot(123, "/usr/bin/opencode", "opencode", &["opencode"], false);
-        assert_eq!(classify(&proc, &[proc.clone()], &defs), Some(AgentKind::OpenCode));
+        assert_eq!(
+            classify(&proc, std::slice::from_ref(&proc), &defs),
+            Some(AgentKind::OpenCode)
+        );
     }
 
     #[test]
@@ -414,7 +437,14 @@ mod tests {
         let defs = vec![def];
 
         let shell = snapshot(100, "/usr/bin/zsh", "zsh", &["zsh"], false);
-        let proc = snapshot_with_parent(200, Some(100), "/usr/bin/opencode", "opencode", &["opencode"], false);
+        let proc = snapshot_with_parent(
+            200,
+            Some(100),
+            "/usr/bin/opencode",
+            "opencode",
+            &["opencode"],
+            false,
+        );
         let procs = vec![shell, proc.clone()];
 
         // Case 1: Parent is a shell
@@ -422,7 +452,14 @@ mod tests {
 
         // Case 2: Parent is NOT a shell
         let not_shell = snapshot(101, "/usr/bin/init", "init", &["init"], false);
-        let proc2 = snapshot_with_parent(201, Some(101), "/usr/bin/opencode", "opencode", &["opencode"], false);
+        let proc2 = snapshot_with_parent(
+            201,
+            Some(101),
+            "/usr/bin/opencode",
+            "opencode",
+            &["opencode"],
+            false,
+        );
         let procs2 = vec![not_shell, proc2.clone()];
         assert_eq!(classify(&proc2, &procs2, &defs), None);
     }
@@ -437,7 +474,7 @@ mod tests {
             &["opencode"],
             false,
         );
-        assert_eq!(classify(&proc, &[proc.clone()], &defs), None);
+        assert_eq!(classify(&proc, std::slice::from_ref(&proc), &defs), None);
     }
 
     #[test]
@@ -469,11 +506,13 @@ mod tests {
                     pid: 123,
                     exe_path: "/usr/bin/opencode".into(),
                     exe_basename: "opencode".into(),
+                    process_name: "opencode".into(),
                     argv: vec!["opencode".into()],
                     cwd: Some("/workspace/app/src".into()),
                     is_thread: false,
                     cpu_usage: 0.0,
                     ppid: None,
+                    os_status: sysinfo::ProcessStatus::Run,
                 }],
                 &defs,
             ),
@@ -503,11 +542,13 @@ mod tests {
                     pid: 123,
                     exe_path: "/usr/bin/opencode".into(),
                     exe_basename: "opencode".into(),
+                    process_name: "opencode".into(),
                     argv: vec!["opencode".into()],
                     cwd: None,
                     is_thread: false,
                     cpu_usage: 0.0,
                     ppid: None,
+                    os_status: sysinfo::ProcessStatus::Run,
                 }],
                 &defs,
             ),
@@ -521,14 +562,26 @@ mod tests {
 
     #[test]
     fn classify_status_returns_idle_below_threshold() {
-        assert_eq!(classify_status(0.0), AgentStatus::Idle);
-        assert_eq!(classify_status(4.9), AgentStatus::Idle);
+        assert_eq!(
+            classify_status(0.0, sysinfo::ProcessStatus::Run),
+            AgentStatus::Idle
+        );
+        assert_eq!(
+            classify_status(4.9, sysinfo::ProcessStatus::Run),
+            AgentStatus::Idle
+        );
     }
 
     #[test]
     fn classify_status_returns_generating_at_or_above_threshold() {
-        assert_eq!(classify_status(5.0), AgentStatus::Generating);
-        assert_eq!(classify_status(75.0), AgentStatus::Generating);
+        assert_eq!(
+            classify_status(5.0, sysinfo::ProcessStatus::Run),
+            AgentStatus::Generating
+        );
+        assert_eq!(
+            classify_status(75.0, sysinfo::ProcessStatus::Run),
+            AgentStatus::Generating
+        );
     }
 
     #[test]
@@ -552,7 +605,14 @@ mod tests {
 
         let agents = collect_detected_agents(
             &[
-                snapshot_with_cpu(100, "/usr/bin/opencode", "opencode", &["opencode"], false, 0.1),
+                snapshot_with_cpu(
+                    100,
+                    "/usr/bin/opencode",
+                    "opencode",
+                    &["opencode"],
+                    false,
+                    0.1,
+                ),
                 snapshot_with_cpu(200, "/usr/bin/claude", "claude", &["claude"], false, 20.0),
             ],
             &defs,
@@ -596,16 +656,19 @@ mod tests {
                     pid: 100,
                     exe_path: "/usr/bin/claude".into(),
                     exe_basename: "claude".into(),
+                    process_name: "claude".into(),
                     argv: vec!["claude".into()],
                     cwd: None,
                     is_thread: false,
                     cpu_usage: 0.0,
                     ppid: None,
+                    os_status: sysinfo::ProcessStatus::Run,
                 },
                 ProcessSnapshot {
                     pid: 200,
                     exe_path: "/home/u/.local/share/claude/versions/2.1.139".into(),
                     exe_basename: "2.1.139".into(),
+                    process_name: "2.1.139".into(),
                     argv: vec![
                         "/home/u/.local/share/claude/versions/2.1.139".into(),
                         "--chrome-native-host".into(),
@@ -614,6 +677,7 @@ mod tests {
                     is_thread: false,
                     cpu_usage: 0.0,
                     ppid: Some(100),
+                    os_status: sysinfo::ProcessStatus::Run,
                 },
             ],
             &defs,
@@ -623,7 +687,7 @@ mod tests {
         assert_eq!(agents[0].pid, 100);
         assert_eq!(agents[0].parent_id, None);
         assert_eq!(agents[1].pid, 200);
-        assert_eq!(agents[1].parent_id, Some(AgentId("pid-100".into())));
+        assert_eq!(agents[1].parent_id, Some(AgentId("100".into())));
     }
 
     #[test]
@@ -646,11 +710,13 @@ mod tests {
                 pid: 500,
                 exe_path: "/usr/bin/claude".into(),
                 exe_basename: "claude".into(),
+                process_name: "claude".into(),
                 argv: vec!["claude".into()],
                 cwd: None,
                 is_thread: false,
                 cpu_usage: 0.0,
                 ppid: Some(99999),
+                os_status: sysinfo::ProcessStatus::Run,
             }],
             &defs,
         );
@@ -668,11 +734,13 @@ mod tests {
                 pid: 123,
                 exe_path: "/usr/bin/opencode".to_string(),
                 exe_basename: "opencode".to_string(),
+                process_name: "opencode".to_string(),
                 argv: vec!["opencode".to_string(), long_arg],
                 cwd: None,
                 is_thread: false,
                 cpu_usage: 0.0,
                 ppid: None,
+                os_status: sysinfo::ProcessStatus::Run,
             }],
             &defs,
         );

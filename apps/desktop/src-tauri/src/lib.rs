@@ -198,7 +198,9 @@ fn list_agents(app: tauri::AppHandle) -> Result<Vec<DetectedAgent>, String> {
 }
 
 #[tauri::command]
-fn list_agent_definitions(app: tauri::AppHandle) -> Result<Vec<opencherry_core::AgentDefinition>, String> {
+fn list_agent_definitions(
+    app: tauri::AppHandle,
+) -> Result<Vec<opencherry_core::AgentDefinition>, String> {
     let dir = config_dir(&app)?;
     persist::list_agent_definitions(&dir).map_err(|e| e.to_string())
 }
@@ -221,7 +223,7 @@ fn remove_agent_definition(app: tauri::AppHandle, id: String) -> Result<bool, St
 #[tauri::command]
 fn update_agent_name(app: tauri::AppHandle, id: String, name: String) -> Result<(), String> {
     let dir = config_dir(&app)?;
-    let mut defs = persist::list_agent_definitions(&dir).map_err(|e| e.to_string())?;
+    let defs = persist::list_agent_definitions(&dir).map_err(|e| e.to_string())?;
     if let Some(mut def) = defs.into_iter().find(|d| d.id == id) {
         def.display_name = name.clone();
         def.kind = opencherry_core::AgentKind::Custom(name);
@@ -292,7 +294,10 @@ pub fn run() {
         ])
         .setup(|app| {
             // Eagerly create config dir so first save doesn't race.
-            let dir = app.path().app_config_dir().expect("failed to resolve config dir");
+            let dir = app
+                .path()
+                .app_config_dir()
+                .expect("failed to resolve config dir");
             let _ = std::fs::create_dir_all(&dir);
             tracing::info!(path = %dir.display(), "config dir ready");
 

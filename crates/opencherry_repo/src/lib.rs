@@ -11,8 +11,8 @@ use std::{collections::HashMap, fs, path::Path, process::Command};
 
 /// Smoke-test entry point: returns the short OID of HEAD or an error.
 pub fn head_short_id(path: &Path) -> anyhow::Result<String> {
-    let repo = git2::Repository::discover(path)
-        .map_err(|_| CoreError::NotARepo(path.to_path_buf()))?;
+    let repo =
+        git2::Repository::discover(path).map_err(|_| CoreError::NotARepo(path.to_path_buf()))?;
     let head = repo.head()?;
     let oid = head
         .target()
@@ -22,8 +22,8 @@ pub fn head_short_id(path: &Path) -> anyhow::Result<String> {
 
 /// Compute a full live status snapshot for the repository at `path`.
 pub fn repo_status(path: &Path) -> anyhow::Result<RepoStatus> {
-    let repo = git2::Repository::discover(path)
-        .map_err(|_| CoreError::NotARepo(path.to_path_buf()))?;
+    let repo =
+        git2::Repository::discover(path).map_err(|_| CoreError::NotARepo(path.to_path_buf()))?;
     let workdir = repo.workdir().unwrap_or(path).to_path_buf();
     let id = RepoId::from_path(&workdir);
 
@@ -49,33 +49,29 @@ pub fn repo_status(path: &Path) -> anyhow::Result<RepoStatus> {
         .map(|s| !s.is_empty())
         .unwrap_or(false);
 
-    let (ahead, behind, upstream) = if let (Some(branch_name), Some(local_oid)) =
-        (branch.as_ref(), head_oid)
-    {
-        match repo.find_branch(branch_name, git2::BranchType::Local) {
-            Ok(local_branch) => match local_branch.upstream() {
-                Ok(upstream_branch) => {
-                    let upstream_name = upstream_branch
-                        .name()
-                        .ok()
-                        .flatten()
-                        .map(|s| s.to_string());
-                    let upstream_oid = upstream_branch.get().target();
-                    match upstream_oid {
-                        Some(up_oid) => match repo.graph_ahead_behind(local_oid, up_oid) {
-                            Ok((a, b)) => (Some(a), Some(b), upstream_name),
-                            Err(_) => (None, None, upstream_name),
-                        },
-                        None => (None, None, upstream_name),
+    let (ahead, behind, upstream) =
+        if let (Some(branch_name), Some(local_oid)) = (branch.as_ref(), head_oid) {
+            match repo.find_branch(branch_name, git2::BranchType::Local) {
+                Ok(local_branch) => match local_branch.upstream() {
+                    Ok(upstream_branch) => {
+                        let upstream_name =
+                            upstream_branch.name().ok().flatten().map(|s| s.to_string());
+                        let upstream_oid = upstream_branch.get().target();
+                        match upstream_oid {
+                            Some(up_oid) => match repo.graph_ahead_behind(local_oid, up_oid) {
+                                Ok((a, b)) => (Some(a), Some(b), upstream_name),
+                                Err(_) => (None, None, upstream_name),
+                            },
+                            None => (None, None, upstream_name),
+                        }
                     }
-                }
+                    Err(_) => (None, None, None),
+                },
                 Err(_) => (None, None, None),
-            },
-            Err(_) => (None, None, None),
-        }
-    } else {
-        (None, None, None)
-    };
+            }
+        } else {
+            (None, None, None)
+        };
 
     Ok(RepoStatus {
         id,
@@ -89,13 +85,17 @@ pub fn repo_status(path: &Path) -> anyhow::Result<RepoStatus> {
 }
 
 pub fn repo_diff(path: &Path) -> anyhow::Result<RepoDiff> {
-    let repo = git2::Repository::discover(path)
-        .map_err(|_| CoreError::NotARepo(path.to_path_buf()))?;
+    let repo =
+        git2::Repository::discover(path).map_err(|_| CoreError::NotARepo(path.to_path_buf()))?;
     let statuses = collect_statuses(&repo)?;
 
     let staged_map = diff_file_map(
         &repo,
-        repo.diff_tree_to_index(head_tree(&repo)?.as_ref(), None, Some(default_diff_options()))?,
+        repo.diff_tree_to_index(
+            head_tree(&repo)?.as_ref(),
+            None,
+            Some(default_diff_options()),
+        )?,
     )?;
     let unstaged_map = diff_file_map(
         &repo,
@@ -122,9 +122,7 @@ pub fn repo_diff(path: &Path) -> anyhow::Result<RepoDiff> {
         }
 
         if entry.untracked {
-            untracked.push(
-                unstaged_file.unwrap_or_else(|| empty_diff_file(&path, "untracked")),
-            );
+            untracked.push(unstaged_file.unwrap_or_else(|| empty_diff_file(&path, "untracked")));
             continue;
         }
 
@@ -133,9 +131,8 @@ pub fn repo_diff(path: &Path) -> anyhow::Result<RepoDiff> {
         }
 
         if entry.has_unstaged {
-            unstaged.push(
-                unstaged_file.unwrap_or_else(|| empty_diff_file(&path, &entry.status_label)),
-            );
+            unstaged
+                .push(unstaged_file.unwrap_or_else(|| empty_diff_file(&path, &entry.status_label)));
         }
     }
 
@@ -214,8 +211,8 @@ pub fn repo_group_snapshot(path: &Path) -> anyhow::Result<RepoGroupSnapshot> {
 }
 
 pub fn stage_file(path: &Path, relative_path: &str) -> anyhow::Result<()> {
-    let repo = git2::Repository::discover(path)
-        .map_err(|_| CoreError::NotARepo(path.to_path_buf()))?;
+    let repo =
+        git2::Repository::discover(path).map_err(|_| CoreError::NotARepo(path.to_path_buf()))?;
     let mut index = repo.index()?;
     index.add_all([relative_path], git2::IndexAddOption::DEFAULT, None)?;
     index.write()?;
@@ -223,8 +220,8 @@ pub fn stage_file(path: &Path, relative_path: &str) -> anyhow::Result<()> {
 }
 
 pub fn unstage_file(path: &Path, relative_path: &str) -> anyhow::Result<()> {
-    let repo = git2::Repository::discover(path)
-        .map_err(|_| CoreError::NotARepo(path.to_path_buf()))?;
+    let repo =
+        git2::Repository::discover(path).map_err(|_| CoreError::NotARepo(path.to_path_buf()))?;
     let head = repo.head()?.peel_to_commit()?;
     repo.reset_default(Some(head.as_object()), [relative_path])?;
     Ok(())
@@ -237,8 +234,8 @@ pub struct DiscardOutcome {
 }
 
 pub fn discard_files(path: &Path, relative_paths: &[&str]) -> anyhow::Result<DiscardOutcome> {
-    let repo = git2::Repository::discover(path)
-        .map_err(|_| CoreError::NotARepo(path.to_path_buf()))?;
+    let repo =
+        git2::Repository::discover(path).map_err(|_| CoreError::NotARepo(path.to_path_buf()))?;
     let workdir = repo
         .workdir()
         .ok_or_else(|| anyhow::anyhow!("repository has no working tree"))?
@@ -315,8 +312,8 @@ fn publish_branch_with<F>(path: &Path, run_git_cmd: F) -> anyhow::Result<RepoAct
 where
     F: Fn(&Path, &[&str]) -> anyhow::Result<()>,
 {
-    let repo = git2::Repository::discover(path)
-        .map_err(|_| CoreError::NotARepo(path.to_path_buf()))?;
+    let repo =
+        git2::Repository::discover(path).map_err(|_| CoreError::NotARepo(path.to_path_buf()))?;
     let head = repo.head()?;
     if !head.is_branch() {
         return Err(anyhow::anyhow!("cannot publish a detached HEAD"));
@@ -337,8 +334,8 @@ fn sync_changes_with<F>(path: &Path, run_git_cmd: F) -> anyhow::Result<RepoActio
 where
     F: Fn(&Path, &[&str]) -> anyhow::Result<()>,
 {
-    let repo = git2::Repository::discover(path)
-        .map_err(|_| CoreError::NotARepo(path.to_path_buf()))?;
+    let repo =
+        git2::Repository::discover(path).map_err(|_| CoreError::NotARepo(path.to_path_buf()))?;
     let head = repo.head()?;
     if !head.is_branch() {
         return Err(anyhow::anyhow!("cannot sync a detached HEAD"));
@@ -363,8 +360,8 @@ fn commit(path: &Path, message: &str, stage_all: bool) -> anyhow::Result<CommitR
         return Err(anyhow::anyhow!("commit message cannot be empty"));
     }
 
-    let repo = git2::Repository::discover(path)
-        .map_err(|_| CoreError::NotARepo(path.to_path_buf()))?;
+    let repo =
+        git2::Repository::discover(path).map_err(|_| CoreError::NotARepo(path.to_path_buf()))?;
     let mut index = repo.index()?;
     if stage_all {
         index.add_all(["*"], git2::IndexAddOption::DEFAULT, None)?;
@@ -424,7 +421,8 @@ fn collect_statuses(repo: &git2::Repository) -> anyhow::Result<Vec<StatusEntry>>
             .head_to_index()
             .and_then(|delta| delta.new_file().path().or_else(|| delta.old_file().path()))
             .or_else(|| {
-                entry.index_to_workdir()
+                entry
+                    .index_to_workdir()
                     .and_then(|delta| delta.new_file().path().or_else(|| delta.old_file().path()))
             })
             .map(|p| p.to_string_lossy().into_owned())
@@ -562,7 +560,11 @@ fn head_tree(repo: &git2::Repository) -> anyhow::Result<Option<git2::Tree<'_>>> 
 }
 
 fn has_staged_changes(repo: &git2::Repository) -> anyhow::Result<bool> {
-    let diff = repo.diff_tree_to_index(head_tree(repo)?.as_ref(), None, Some(default_diff_options()))?;
+    let diff = repo.diff_tree_to_index(
+        head_tree(repo)?.as_ref(),
+        None,
+        Some(default_diff_options()),
+    )?;
     Ok(diff.deltas().len() > 0)
 }
 
@@ -652,12 +654,16 @@ fn delta_status_label(status: git2::Delta) -> &'static str {
 
 fn default_remote_name(repo: &git2::Repository) -> anyhow::Result<String> {
     if let Ok(head) = repo.head() {
-        if let Ok(branch) = head.resolve().and_then(|h| h.peel_to_commit()).and_then(|_| {
-            repo.find_branch(
-                head.shorthand().unwrap_or_default(),
-                git2::BranchType::Local,
-            )
-        }) {
+        if let Ok(branch) = head
+            .resolve()
+            .and_then(|h| h.peel_to_commit())
+            .and_then(|_| {
+                repo.find_branch(
+                    head.shorthand().unwrap_or_default(),
+                    git2::BranchType::Local,
+                )
+            })
+        {
             if let Ok(upstream) = branch.upstream() {
                 if let Ok(Some(name)) = upstream.name() {
                     if let Some((remote, _branch)) = name.split_once('/') {
@@ -689,7 +695,11 @@ where
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
         let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        Err(anyhow::anyhow!(if !stderr.is_empty() { stderr } else { stdout }))
+        Err(anyhow::anyhow!(if !stderr.is_empty() {
+            stderr
+        } else {
+            stdout
+        }))
     }
 }
 
@@ -781,10 +791,7 @@ mod tests {
         fn append_file(&self, relative_path: &str, contents: &str) {
             let file_path = self.path.join(relative_path);
             use std::io::Write;
-            let mut file = fs::OpenOptions::new()
-                .append(true)
-                .open(file_path)
-                .unwrap();
+            let mut file = fs::OpenOptions::new().append(true).open(file_path).unwrap();
             file.write_all(contents.as_bytes()).unwrap();
         }
 
@@ -794,7 +801,9 @@ mod tests {
 
         fn commit_all_files(&self, message: &str) -> git2::Oid {
             let mut index = self.repo.index().unwrap();
-            index.add_all(["*"], git2::IndexAddOption::DEFAULT, None).unwrap();
+            index
+                .add_all(["*"], git2::IndexAddOption::DEFAULT, None)
+                .unwrap();
             index.write().unwrap();
             self.commit_index(message)
         }
@@ -823,16 +832,13 @@ mod tests {
         }
 
         fn create_branch_with_remote(&self, name: &str, remote: &str) {
-            let head_commit = self
-                .repo
-                .head()
-                .unwrap()
-                .peel_to_commit()
-                .unwrap();
+            let head_commit = self.repo.head().unwrap().peel_to_commit().unwrap();
             self.repo.branch(name, &head_commit, true).unwrap();
             self.repo.set_head(&format!("refs/heads/{name}")).unwrap();
             self.repo.checkout_head(None).unwrap();
-            self.repo.remote(remote, "https://example.com/opencherry.git").unwrap();
+            self.repo
+                .remote(remote, "https://example.com/opencherry.git")
+                .unwrap();
             self.repo
                 .reference(
                     &format!("refs/remotes/{remote}/{name}"),
@@ -846,7 +852,10 @@ mod tests {
                 .set_str(&format!("branch.{name}.remote"), remote)
                 .unwrap();
             config
-                .set_str(&format!("branch.{name}.merge"), &format!("refs/heads/{name}"))
+                .set_str(
+                    &format!("branch.{name}.merge"),
+                    &format!("refs/heads/{name}"),
+                )
                 .unwrap();
         }
     }
@@ -904,7 +913,9 @@ mod tests {
         index.add_path(Path::new("behind.txt")).unwrap();
         index.write().unwrap();
         let remote_commit = repo.commit_index("remote ahead");
-        repo.repo.reset(&head_commit.into_object(), git2::ResetType::Hard, None).unwrap();
+        repo.repo
+            .reset(&head_commit.into_object(), git2::ResetType::Hard, None)
+            .unwrap();
         repo.repo
             .reference(
                 "refs/remotes/origin/feature",
@@ -955,7 +966,8 @@ mod tests {
                 .set_str("user.email", "tests@opencherry.local")
                 .unwrap();
         }
-        seed.remote("origin", remote_path.to_str().unwrap()).unwrap();
+        seed.remote("origin", remote_path.to_str().unwrap())
+            .unwrap();
         fs::write(seed_path.join("shared.txt"), "base\n").unwrap();
         {
             let mut index = seed.index().unwrap();
@@ -967,16 +979,13 @@ mod tests {
             seed.commit(Some("HEAD"), &sig, &sig, "initial", &tree, &[])
                 .unwrap();
         }
-        let branch_name = seed
-            .head()
-            .unwrap()
-            .shorthand()
-            .unwrap()
-            .to_string();
+        let branch_name = seed.head().unwrap().shorthand().unwrap().to_string();
         seed.find_remote("origin")
             .unwrap()
             .push(
-                &[&format!("refs/heads/{branch_name}:refs/heads/{branch_name}")],
+                &[&format!(
+                    "refs/heads/{branch_name}:refs/heads/{branch_name}"
+                )],
                 None,
             )
             .unwrap();
@@ -1009,7 +1018,9 @@ mod tests {
             .find_remote("origin")
             .unwrap()
             .push(
-                &[&format!("refs/heads/{branch_name}:refs/heads/{branch_name}")],
+                &[&format!(
+                    "refs/heads/{branch_name}:refs/heads/{branch_name}"
+                )],
                 None,
             )
             .unwrap();
@@ -1068,11 +1079,8 @@ mod tests {
         repo.write_file("modified.txt", "dirty\n");
         repo.write_file("scratch.txt", "untracked\n");
 
-        let outcome = discard_files(
-            repo.path(),
-            &["modified.txt", "scratch.txt", "README.md"],
-        )
-        .unwrap();
+        let outcome =
+            discard_files(repo.path(), &["modified.txt", "scratch.txt", "README.md"]).unwrap();
 
         assert_eq!(outcome.discarded.len(), 2);
         assert!(outcome.discarded.contains(&"modified.txt".to_string()));
@@ -1094,8 +1102,7 @@ mod tests {
         repo.commit_all_files("seed real.txt");
         repo.write_file("real.txt", "dirty\n");
 
-        let outcome =
-            discard_files(repo.path(), &["real.txt", "ghost.txt"]).unwrap();
+        let outcome = discard_files(repo.path(), &["real.txt", "ghost.txt"]).unwrap();
 
         assert_eq!(outcome.discarded, vec!["real.txt".to_string()]);
         assert_eq!(outcome.failed.len(), 1);
@@ -1234,7 +1241,11 @@ mod tests {
                     "origin".to_string(),
                     "feature".to_string(),
                 ],
-                vec!["push".to_string(), "origin".to_string(), "feature".to_string()],
+                vec![
+                    "push".to_string(),
+                    "origin".to_string(),
+                    "feature".to_string()
+                ],
             ]
         );
     }

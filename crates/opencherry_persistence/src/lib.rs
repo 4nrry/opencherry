@@ -369,7 +369,7 @@ pub fn sync_agent_rules(config_dir: &Path, url: &str) -> anyhow::Result<usize> {
     let response = ureq::get(&target).call()?;
     let new_defs: Vec<AgentDefinition> = response.into_json()?;
     tracing::info!("Fetched {} definitions from remote", new_defs.len());
-    
+
     let conn = open(config_dir)?;
     let mut count = 0;
     for def in new_defs {
@@ -381,7 +381,10 @@ pub fn sync_agent_rules(config_dir: &Path, url: &str) -> anyhow::Result<usize> {
     Ok(count)
 }
 
-fn upsert_agent_definition_with_conn(conn: &Connection, def: &AgentDefinition) -> anyhow::Result<()> {
+fn upsert_agent_definition_with_conn(
+    conn: &Connection,
+    def: &AgentDefinition,
+) -> anyhow::Result<()> {
     let kind_json = serde_json::to_string(&def.kind)?;
     let rules_json = serde_json::to_string(&def.rules)?;
     conn.execute(
@@ -394,7 +397,13 @@ fn upsert_agent_definition_with_conn(conn: &Connection, def: &AgentDefinition) -
             rules_json = excluded.rules_json,
             is_builtin = excluded.is_builtin
         "#,
-        params![def.id, kind_json, def.display_name, rules_json, if def.is_builtin { 1 } else { 0 }],
+        params![
+            def.id,
+            kind_json,
+            def.display_name,
+            rules_json,
+            if def.is_builtin { 1 } else { 0 }
+        ],
     )?;
     Ok(())
 }
@@ -405,7 +414,6 @@ pub fn remove_agent_definition(config_dir: &Path, id: &str) -> anyhow::Result<bo
     let changed = conn.execute("DELETE FROM agent_definitions WHERE id = ?1", params![id])?;
     Ok(changed > 0)
 }
-
 
 /// Seed the database with default rules from a JSON string.
 pub fn seed_default_rules(config_dir: &Path, json: &str) -> anyhow::Result<()> {
