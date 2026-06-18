@@ -187,6 +187,7 @@ describe("OpenCherry desktop fixture flows", () => {
     await expect(await diffFile("unstaged", "tracked.txt")).toBeExisting();
 
     await clickWhenReady(await (await diffFile("untracked", "scratch.txt")).$('button=Discard'));
+    await clickWhenReady(await $('button=Discard changes'));
     await expect(await diffFile("untracked", "scratch.txt")).not.toBeExisting();
 
     await clickWhenReady(await (await diffFile("unstaged", "tracked.txt")).$('button=Stage'));
