@@ -233,7 +233,7 @@ describe("OpenCherry desktop fixture flows", () => {
     await clickWhenReady(await $(".primary-action-bar .btn"));
 
     await expect($(".commit-box__result")).toHaveText("Published main to origin");
-    await expect($(".primary-action-bar .btn")).not.toBeExisting();
+    await expect($(".primary-action-bar .btn")).toHaveText("Up to date");
   });
 
   it("syncs incoming remote changes", async () => {
