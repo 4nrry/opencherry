@@ -381,18 +381,23 @@ function RepoGroupView(props: {
   }
 
   const [syncingAll, setSyncingAll] = createSignal(false);
+  const [syncErrors, setSyncErrors] = createSignal<string[]>([]);
 
   const handleSyncAll = async () => {
     setSyncingAll(true);
+    setSyncErrors([]);
     try {
       const repos = snapshot()?.repos ?? [];
       const tracked = repos.filter(r => isTrackedRepo(r.repo.path)).map(r => r.repo.path);
       
-      const promises = tracked.map(path => 
-        syncChanges(path).catch(e => {
-          console.error("Failed to sync", path, e);
-        })
-      );
+      const promises = tracked.map(async path => {
+        try {
+          await syncChanges(path);
+        } catch (e) {
+          const name = path.split('/').pop() || path;
+          setSyncErrors(errs => [...errs, `Failed to sync ${name}: ${String(e)}`]);
+        }
+      });
       await Promise.all(promises);
       
       await refetch();
@@ -440,6 +445,15 @@ function RepoGroupView(props: {
       >
         {(group) => (
           <>
+            <Show when={syncErrors().length > 0}>
+              <div class="banner banner--error">
+                <ul style={{ margin: 0, "padding-left": "20px" }}>
+                  <For each={syncErrors()}>
+                    {err => <li>{err}</li>}
+                  </For>
+                </ul>
+              </div>
+            </Show>
             <div class="status-grid">
               <StatusCard label="Repos" value={String(group().repos.length)} />
               <StatusCard
