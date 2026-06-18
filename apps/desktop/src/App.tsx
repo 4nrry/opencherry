@@ -381,7 +381,7 @@ function RepoGroupView(props: {
   }
 
   const [syncingAll, setSyncingAll] = createSignal(false);
-  const [syncErrors, setSyncErrors] = createSignal<string[]>([]);
+  const [syncErrors, setSyncErrors] = createSignal<{repoName: string, path: string, errorMsg: string}[]>([]);
 
   const handleSyncAll = async () => {
     setSyncingAll(true);
@@ -395,7 +395,7 @@ function RepoGroupView(props: {
           await syncChanges(path);
         } catch (e) {
           const name = path.split('/').pop() || path;
-          setSyncErrors(errs => [...errs, `Failed to sync ${name}: ${String(e)}`]);
+          setSyncErrors(errs => [...errs, { repoName: name, path, errorMsg: String(e) }]);
         }
       });
       await Promise.all(promises);
@@ -446,12 +446,10 @@ function RepoGroupView(props: {
         {(group) => (
           <>
             <Show when={syncErrors().length > 0}>
-              <div class="banner banner--error">
-                <ul style={{ margin: 0, "padding-left": "20px" }}>
-                  <For each={syncErrors()}>
-                    {err => <li>{err}</li>}
-                  </For>
-                </ul>
+              <div class="banner banner--error" style={{ display: 'flex', "flex-direction": "column", gap: '8px', padding: '12px' }}>
+                <For each={syncErrors()}>
+                  {err => <SyncErrorItem error={err} />}
+                </For>
               </div>
             </Show>
             <div class="status-grid">
@@ -1076,6 +1074,37 @@ export function DiffGroup(props: {
         </For>
       </section>
     </Show>
+  );
+}
+
+function SyncErrorItem(props: { error: { repoName: string, path: string, errorMsg: string } }) {
+  const [copied, setCopied] = createSignal(false);
+
+  const handleCopy = () => {
+    const isConflict = props.error.errorMsg.toLowerCase().includes("conflict") || props.error.errorMsg.toLowerCase().includes("merge");
+    const prompt = isConflict
+      ? `I tried to sync the repository at '${props.error.path}' but ran into a git merge conflict. Please find the conflicting files, carefully resolve the conflicts preserving logic from both branches, and then run 'git commit' to finish the merge.`
+      : `I tried to sync the repository at '${props.error.path}' but encountered this git error:\n\n${props.error.errorMsg}\n\nPlease investigate and fix this issue so I can sync successfully.`;
+
+    void navigator.clipboard.writeText(prompt);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div style={{ display: 'flex', "align-items": "start", "justify-content": "space-between", gap: '12px', "border-bottom": "1px solid rgba(255,255,255,0.1)", "padding-bottom": "8px" }}>
+      <div style={{ flex: 1, "word-break": "break-word" }}>
+        <strong>{props.error.repoName}</strong>: {props.error.errorMsg}
+      </div>
+      <button
+        class="btn btn--tiny"
+        style={{ "white-space": "nowrap", "flex-shrink": 0 }}
+        onClick={handleCopy}
+        title="Copy prompt for your AI agent"
+      >
+        {copied() ? "✅ Copied" : "📋 Copy Prompt"}
+      </button>
+    </div>
   );
 }
 
