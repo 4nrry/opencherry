@@ -380,6 +380,27 @@ function RepoGroupView(props: {
     });
   }
 
+  const [syncingAll, setSyncingAll] = createSignal(false);
+
+  const handleSyncAll = async () => {
+    setSyncingAll(true);
+    try {
+      const repos = snapshot()?.repos ?? [];
+      const tracked = repos.filter(r => isTrackedRepo(r.repo.path)).map(r => r.repo.path);
+      
+      const promises = tracked.map(path => 
+        syncChanges(path).catch(e => {
+          console.error("Failed to sync", path, e);
+        })
+      );
+      await Promise.all(promises);
+      
+      await refetch();
+    } finally {
+      setSyncingAll(false);
+    }
+  };
+
   let timer: ReturnType<typeof setInterval> | undefined;
   onMount(() => {
     timer = setInterval(() => {
@@ -392,9 +413,21 @@ function RepoGroupView(props: {
 
   return (
     <section class="repo-view">
-      <header class="repo-view__header">
-        <h1>{props.group.display_name}</h1>
-        <code class="repo-view__path">{props.group.path}</code>
+      <header class="repo-view__header" style={{ "flex-direction": "row", "align-items": "center", "justify-content": "space-between" }}>
+        <div>
+          <h1>{props.group.display_name}</h1>
+          <code class="repo-view__path">{props.group.path}</code>
+        </div>
+        <button
+          onClick={handleSyncAll}
+          disabled={syncingAll()}
+          class="btn--sync-all"
+        >
+          <span>{syncingAll() ? 'Sincronizando...' : 'Sincronizar tudo'}</span>
+          <svg class={syncingAll() ? 'icon-spin' : ''} width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 1121.21 16H18m0 0H22m-3 0v4" />
+          </svg>
+        </button>
       </header>
 
       <Show
