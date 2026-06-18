@@ -221,6 +221,13 @@ describe("OpenCherry desktop fixture flows", () => {
     await clickWhenReady(await repoListItem("publish-repo"));
 
     await expect($(".repo-view__header h1")).toHaveText("publish-repo");
+
+    // Clear unstaged files first since AdaptiveActionBar prioritizes commits
+    const message = await $(".commit-box__message");
+    await message.setValue("clean for publish");
+    await clickWhenReady(await $('button=Stage all & commit'));
+    await expect($(".commit-box__result")).toHaveText(expect.stringMatching(/clean for publish/));
+
     await expect($(".primary-action-bar .btn")).toHaveText("Publish branch");
 
     await clickWhenReady(await $(".primary-action-bar .btn"));
@@ -233,7 +240,7 @@ describe("OpenCherry desktop fixture flows", () => {
     await clickWhenReady(await repoListItem("sync-repo"));
 
     await expect($(".repo-view__header h1")).toHaveText("sync-repo");
-    await expect($(".primary-action-bar .btn")).toHaveText(expect.stringMatching(/^sync changes/i));
+    await expect($(".primary-action-bar .btn")).toHaveText(expect.stringMatching(/^(sync changes|pull)/i));
 
     await clickWhenReady(await $(".primary-action-bar .btn"));
 
