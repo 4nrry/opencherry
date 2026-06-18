@@ -18,6 +18,28 @@ function groupFilterButton(filterName: "all" | "untracked" | "tracked" | "dirty"
   return $(`button=${filterName}`);
 }
 
+// Helper to robustly click an element: wait for existence, scroll into view and retry if click is intercepted.
+async function clickWhenReady(el: WebdriverIO.Element) {
+  if (!el) throw new Error('clickWhenReady: element is undefined');
+  // wait for element to exist
+  await el.waitForExist({ timeout: 5000 });
+  // try several times in case of intermittent overlay or animation
+  for (let i = 0; i < 5; i++) {
+    try {
+      // ensure it's in view
+      await el.scrollIntoView();
+      // small pause to let layout settle
+      await browser.pause(120);
+      await el.click();
+      return;
+    } catch (err) {
+      // If click intercepted, retry after a short delay
+      await browser.pause(200 + i * 50);
+      if (i === 4) throw err;
+    }
+  }
+}
+
 async function removeRepoIfTracked(repoName: string) {
   const item = await repoListItem(repoName);
   if (await item.isExisting()) {
@@ -39,7 +61,7 @@ describe("OpenCherry desktop fixture flows", () => {
   });
 
   it("opens an untracked child repo directly from the group view", async () => {
-    await (await repoListItem("workspace-group")).click();
+    await clickWhenReady(await repoListItem("workspace-group"));
 
     const childRepo = await groupChildCard("child-repo");
     await childRepo.click();
@@ -59,7 +81,7 @@ describe("OpenCherry desktop fixture flows", () => {
     await expect(childRepo).toHaveText(expect.stringMatching(/child-repo/));
 
     const trackButton = await childRepo.$('button=Track');
-    await trackButton.click();
+    await clickWhenReady(trackButton);
 
     await expect($(".repo-view__header h1")).toHaveText("child-repo");
     await expect(await repoListItem("child-repo")).toBeExisting();
@@ -77,13 +99,13 @@ describe("OpenCherry desktop fixture flows", () => {
     await expect(await groupChildCard("tools-repo")).toBeExisting();
     await expect($('button=Track all')).toBeExisting();
 
-    await (await $('button=Track all')).click();
+    await clickWhenReady(await $('button=Track all'));
 
     await expect($(".repo-view__header h1")).toHaveText("tools-repo");
     await expect(await repoListItem("child-repo")).toBeExisting();
     await expect(await repoListItem("tools-repo")).toBeExisting();
 
-    await (await repoListItem("workspace-group")).click();
+    await clickWhenReady(await repoListItem("workspace-group"));
     await expect(await groupChildCard("child-repo")).not.toBeExisting();
     await expect(await groupChildCard("tools-repo")).not.toBeExisting();
     await expect($(".diff-panel .empty")).toHaveText("No child repositories match this filter.");
@@ -97,15 +119,15 @@ describe("OpenCherry desktop fixture flows", () => {
     await expect(await groupChildCard("child-repo")).toBeExisting();
     await expect(await groupChildCard("tools-repo")).toBeExisting();
 
-    await (await groupChildCheckbox("child-repo")).click();
+    await clickWhenReady(await groupChildCheckbox("child-repo"));
     await expect($('button=Track selected (1)')).toBeExisting();
-    await (await $('button=Track selected (1)')).click();
+    await clickWhenReady(await $('button=Track selected (1)'));
 
     await expect($(".repo-view__header h1")).toHaveText("child-repo");
     await expect(await repoListItem("child-repo")).toBeExisting();
     await expect(await repoListItem("tools-repo")).not.toBeExisting();
 
-    await (await repoListItem("workspace-group")).click();
+    await clickWhenReady(await repoListItem("workspace-group"));
     await expect(await groupChildCard("child-repo")).not.toBeExisting();
     await expect(await groupChildCard("tools-repo")).toBeExisting();
   });
@@ -118,7 +140,7 @@ describe("OpenCherry desktop fixture flows", () => {
     await expect(await groupChildCard("child-repo")).toBeExisting();
     await expect(await groupChildCard("tools-repo")).toBeExisting();
 
-    await (await (await groupChildCard("child-repo")).$('button=Track')).click();
+    await clickWhenReady(await (await groupChildCard("child-repo")).$('button=Track'));
     await expect($(".repo-view__header h1")).toHaveText("child-repo");
 
     const message = await $(".commit-box__message");
@@ -126,7 +148,7 @@ describe("OpenCherry desktop fixture flows", () => {
     await (await $('button=Stage all + commit')).click();
     await expect($(".commit-box__result")).toHaveText(expect.stringMatching(/clean tracked child/));
 
-    await (await repoListItem("workspace-group")).click();
+    await clickWhenReady(await repoListItem("workspace-group"));
     await expect($(".diff-panel")).toHaveText(expect.stringMatching(/1 already tracked/i));
 
     await expect(await groupChildCard("child-repo")).not.toBeExisting();
@@ -158,28 +180,28 @@ describe("OpenCherry desktop fixture flows", () => {
     await expect(await diffFile("unstaged", "tracked.txt")).toBeExisting();
     await expect(await diffFile("untracked", "scratch.txt")).toBeExisting();
 
-    await (await diffFile("unstaged", "tracked.txt")).$('button=Stage').click();
+    await clickWhenReady(await (await diffFile("unstaged", "tracked.txt")).$('button=Stage'));
     await expect(await diffFile("staged", "tracked.txt")).toBeExisting();
 
-    await (await diffFile("staged", "tracked.txt")).$('button=Unstage').click();
+    await clickWhenReady(await (await diffFile("staged", "tracked.txt")).$('button=Unstage'));
     await expect(await diffFile("unstaged", "tracked.txt")).toBeExisting();
 
-    await (await diffFile("untracked", "scratch.txt")).$('button=Discard').click();
+    await clickWhenReady(await (await diffFile("untracked", "scratch.txt")).$('button=Discard'));
     await expect(await diffFile("untracked", "scratch.txt")).not.toBeExisting();
 
-    await (await diffFile("unstaged", "tracked.txt")).$('button=Stage').click();
+    await clickWhenReady(await (await diffFile("unstaged", "tracked.txt")).$('button=Stage'));
     const message = await $(".commit-box__message");
     await message.setValue("real e2e commit");
 
     const commitButton = await $('button=Commit staged');
-    await commitButton.click();
+    await clickWhenReady(commitButton);
 
     await expect($(".commit-box__result")).toHaveText(expect.stringMatching(/real e2e commit/));
     await expect($(".diff-panel .empty")).toHaveText("No working tree changes.");
   });
 
   it("supports stage all plus commit on a real repo", async () => {
-    await (await repoListItem("commit-all-repo")).click();
+    await clickWhenReady(await repoListItem("commit-all-repo"));
 
     await expect($(".repo-view__header h1")).toHaveText("commit-all-repo");
     await expect(await diffFile("unstaged", "all.txt")).toBeExisting();
@@ -188,31 +210,31 @@ describe("OpenCherry desktop fixture flows", () => {
     const message = await $(".commit-box__message");
     await message.setValue("commit all flow");
 
-    await (await $('button=Stage all + commit')).click();
+    await clickWhenReady(await $('button=Stage all + commit'));
 
     await expect($(".commit-box__result")).toHaveText(expect.stringMatching(/commit all flow/));
     await expect($(".diff-panel .empty")).toHaveText("No working tree changes.");
   });
 
   it("publishes a branch to its first remote", async () => {
-    await (await repoListItem("publish-repo")).click();
+    await clickWhenReady(await repoListItem("publish-repo"));
 
     await expect($(".repo-view__header h1")).toHaveText("publish-repo");
     await expect($(".primary-action-bar .btn")).toHaveText("Publish branch");
 
-    await (await $(".primary-action-bar .btn")).click();
+    await clickWhenReady(await $(".primary-action-bar .btn"));
 
     await expect($(".commit-box__result")).toHaveText("Published main to origin");
     await expect($(".primary-action-bar .btn")).not.toBeExisting();
   });
 
   it("syncs incoming remote changes", async () => {
-    await (await repoListItem("sync-repo")).click();
+    await clickWhenReady(await repoListItem("sync-repo"));
 
     await expect($(".repo-view__header h1")).toHaveText("sync-repo");
     await expect($(".primary-action-bar .btn")).toHaveText(expect.stringMatching(/^sync changes/i));
 
-    await (await $(".primary-action-bar .btn")).click();
+    await clickWhenReady(await $(".primary-action-bar .btn"));
 
     await expect($(".commit-box__result")).toHaveText("Synced main with origin");
     await expect($(".diff-panel .empty")).toHaveText("No working tree changes.");
@@ -220,7 +242,7 @@ describe("OpenCherry desktop fixture flows", () => {
 
   it("removes a tracked repo from the sidebar without touching others", async () => {
     await expect(await repoListItem("publish-repo")).toBeExisting();
-    await (await removeRepoButton("publish-repo")).click();
+    await clickWhenReady(await removeRepoButton("publish-repo"));
 
     await expect(await repoListItem("publish-repo")).not.toBeExisting();
     await expect(await repoListItem("tracked-repo")).toBeExisting();
