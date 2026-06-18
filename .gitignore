@@ -37,3 +37,4 @@ dist/
 # Local icon working files
 /opencherry-icon-rounded.png
 /apps/desktop/src-tauri/opencherry-icon-source.png
+.antigravitycli/
