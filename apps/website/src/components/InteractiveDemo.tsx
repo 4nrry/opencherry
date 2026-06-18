@@ -204,7 +204,7 @@ export default function InteractiveDemo() {
     <div class="w-full max-w-5xl mx-auto bg-obsidian-light border border-obsidian-border rounded-xl shadow-2xl shadow-black/80 overflow-hidden font-mono text-sm flex flex-col md:flex-row h-[550px] relative z-20">
       
       {/* 1. Left Sidebar: Repo list */}
-      <div class="w-full md:w-64 bg-obsidian border-r border-obsidian-border flex flex-col justify-between shrink-0">
+      <div class="w-full md:w-64 bg-obsidian border-r border-obsidian-border flex flex-col shrink-0">
         <div>
           {/* Header */}
           <div class="px-4 py-3 border-b border-obsidian-border flex items-center justify-between bg-obsidian-light/50">
@@ -265,31 +265,14 @@ export default function InteractiveDemo() {
           </div>
         </div>
 
-        {/* Action Button: Parallel commit */}
-        <div class="p-3 border-t border-obsidian-border bg-obsidian-light/30">
-          <button
-            onClick={triggerSimulation}
-            disabled={isSimulating()}
-            class={`w-full py-2 px-3 rounded-lg flex items-center justify-center space-x-2 font-semibold transition-all duration-300 shadow-md ${
-              isSimulating()
-                ? 'bg-cherry/20 text-cherry/60 cursor-not-allowed border border-cherry/10 animate-pulse'
-                : 'bg-cherry text-white hover:bg-cherry/90 hover:scale-[1.01] hover:shadow-cherry/10 active:scale-[0.99] border border-cherry/30'
-            }`}
-          >
-            <span>{isSimulating() ? 'Syncing...' : 'Sync All Workspaces'}</span>
-            <svg class={`w-4 h-4 ${isSimulating() ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 1121.21 16H18m0 0H22m-3 0v4" />
-            </svg>
-          </button>
-        </div>
       </div>
 
       {/* 2. Right Main Panel */}
       <div class="flex-1 flex flex-col min-w-0 bg-obsidian-card">
         
         {/* Tab Headers */}
-        <div class="flex items-center justify-between border-b border-obsidian-border bg-obsidian px-2 py-0.5 shrink-0">
-          <div class="flex items-center space-x-1">
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b border-obsidian-border bg-obsidian px-2 py-2 sm:py-0.5 shrink-0">
+          <div class="flex items-center space-x-1 overflow-x-auto">
             <button
               onClick={() => setActiveTab('logs')}
               class={`px-4 py-2.5 border-b-2 text-xs font-semibold tracking-wide transition-all ${
@@ -322,8 +305,24 @@ export default function InteractiveDemo() {
             </button>
           </div>
           
-          <div class="text-[11px] text-zinc-500 px-3 hidden sm:block">
-            active_repo: <span class="text-zinc-400 font-bold">{activeRepo()}</span>
+          <div class="flex items-center gap-3 px-1 sm:px-3">
+            <div class="text-[11px] text-zinc-500 hidden sm:block">
+              active_repo: <span class="text-zinc-400 font-bold">{activeRepo()}</span>
+            </div>
+            <button
+              onClick={triggerSimulation}
+              disabled={isSimulating()}
+              class={`w-full sm:w-auto py-2 sm:py-1.5 px-3 rounded-lg flex items-center justify-center space-x-2 text-xs font-semibold transition-all duration-300 shadow-md whitespace-nowrap ${
+                isSimulating()
+                  ? 'bg-cherry/20 text-cherry/60 cursor-not-allowed border border-cherry/10 animate-pulse'
+                  : 'bg-cherry text-white hover:bg-cherry/90 hover:scale-[1.01] hover:shadow-cherry/10 active:scale-[0.99] border border-cherry/30'
+              }`}
+            >
+              <span>{isSimulating() ? 'Sincronizando...' : 'Sincronizar tudo'}</span>
+              <svg class={`w-4 h-4 ${isSimulating() ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 1121.21 16H18m0 0H22m-3 0v4" />
+              </svg>
+            </button>
           </div>
         </div>
 
