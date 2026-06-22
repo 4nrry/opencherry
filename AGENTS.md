@@ -49,7 +49,9 @@ E2E (separate package — do not run via root pnpm):
 
 ## CI expectations (`.github/workflows/ci.yml`)
 
-Three jobs run on Ubuntu: `cargo test --workspace`, frontend `pnpm test` + `pnpm build`, and the desktop E2E (installs `tauri-driver` + `webkitgtk-webdriver`). Match these locally before pushing.
+Four jobs: three on Ubuntu — `cargo test --workspace`, frontend `pnpm test` + `pnpm build`, and the desktop E2E (installs `tauri-driver` + `webkitgtk-webdriver`) — plus a `cross-platform` matrix that runs the library crate tests (`opencherry_core`/`repo`/`agents`/`persistence`) on `windows-latest` and `macos-latest`. Match these locally before pushing. Platform-specific logic (agent detection `.exe`/shell handling, path separators) must stay portable so the cross-platform job stays green.
+
+Release bundles are built by `release-linux.yml` (`.deb`), `release-windows.yml` (NSIS `.exe`), and `release-macos.yml` (`.dmg`, aarch64 + x86_64), triggered by `v*` tags or `workflow_dispatch`.
 
 ## Validation checklist after changes
 

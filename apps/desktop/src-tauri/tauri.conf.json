@@ -40,6 +40,14 @@
         "desktopTemplate": "templates/opencherry.desktop"
       }
     },
+    "macOS": {
+      "minimumSystemVersion": "10.15"
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    },
     "icon": [
       "icons/32x32.png",
       "icons/64x64.png",

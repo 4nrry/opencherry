@@ -766,6 +766,15 @@ mod tests {
             let path = root.path().join("repo");
             fs::create_dir_all(&path).unwrap();
             let repo = Repository::init(&path).unwrap();
+            // Pin line-ending behavior so tests are deterministic across
+            // platforms. Windows CI runners default to `core.autocrlf=true`
+            // globally, which would rewrite checked-out `\n` content as `\r\n`
+            // and break exact-content assertions (e.g. in discard_files).
+            {
+                let mut config = repo.config().unwrap();
+                config.set_bool("core.autocrlf", false).unwrap();
+                config.set_str("core.eol", "lf").unwrap();
+            }
             let this = Self {
                 _root: root,
                 path,

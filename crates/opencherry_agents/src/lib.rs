@@ -81,11 +81,54 @@ pub fn classify_status(cpu_usage: f32, os_status: sysinfo::ProcessStatus) -> Age
     }
 }
 
-/// Known interactive shell process names.
-const SHELL_PROCESS_NAMES: &[&str] = &["bash", "zsh", "fish", "sh", "dash", "tmux", "screen"];
+/// Known interactive shell / terminal multiplexer process names.
+///
+/// Includes Unix shells plus the common Windows shells and terminals, so the
+/// `require_shell_parent` heuristic works on every supported platform.
+const SHELL_PROCESS_NAMES: &[&str] = &[
+    // Unix shells & multiplexers
+    "bash",
+    "zsh",
+    "fish",
+    "sh",
+    "dash",
+    "tmux",
+    "screen",
+    // Windows shells & terminals
+    "cmd",
+    "powershell",
+    "pwsh",
+    "wt",
+    "windowsterminal",
+    "conhost",
+    "nu",
+];
+
+/// Windows executable extensions to strip before comparing process names.
+///
+/// On Windows `sysinfo` reports basenames such as `claude.exe` / `node.exe`,
+/// but agent rules are written with bare names (`claude`, `node`). Stripping
+/// the extension lets the same rule set match on every platform.
+const WINDOWS_EXE_SUFFIXES: &[&str] = &[".exe", ".cmd", ".bat", ".com"];
+
+/// Return `name` without a trailing Windows executable extension (if any).
+fn strip_exe_suffix(name: &str) -> &str {
+    for ext in WINDOWS_EXE_SUFFIXES {
+        if name.len() > ext.len() {
+            let (base, suffix) = name.split_at(name.len() - ext.len());
+            if suffix.eq_ignore_ascii_case(ext) {
+                return base;
+            }
+        }
+    }
+    name
+}
 
 fn is_shell_process(exe_basename: &str) -> bool {
-    SHELL_PROCESS_NAMES.contains(&exe_basename)
+    let name = strip_exe_suffix(exe_basename);
+    SHELL_PROCESS_NAMES
+        .iter()
+        .any(|shell| shell.eq_ignore_ascii_case(name))
 }
 
 /// Classify a process against a list of definitions.
@@ -94,7 +137,9 @@ fn classify(
     all_processes: &[ProcessSnapshot],
     definitions: &[AgentDefinition],
 ) -> Option<AgentKind> {
-    let exe_path_lc = process.exe_path.to_ascii_lowercase();
+    // Normalize Windows path separators so the Unix-style substrings below
+    // match on every platform.
+    let exe_path_lc = process.exe_path.to_ascii_lowercase().replace('\\', "/");
 
     // Universal exclusions (except for Antigravity CLI itself)
     if (exe_path_lc.contains("/.antigravity/extensions/")
@@ -120,22 +165,23 @@ fn matches_rule(
     process: &ProcessSnapshot,
     all_processes: &[ProcessSnapshot],
 ) -> bool {
-    // 1. Exe basename match
+    // 1. Exe basename match (extension-insensitive so `claude.exe` on Windows
+    //    matches a rule written as `claude`).
     if let Some(ref target) = rule.exe_basename {
-        if !process.exe_basename.eq_ignore_ascii_case(target)
-            && !process.process_name.eq_ignore_ascii_case(target)
-        {
+        let target = strip_exe_suffix(target);
+        let basename = strip_exe_suffix(&process.exe_basename);
+        let proc_name = strip_exe_suffix(&process.process_name);
+        if !basename.eq_ignore_ascii_case(target) && !proc_name.eq_ignore_ascii_case(target) {
             return false;
         }
     }
 
-    // 2. Exe path contains
+    // 2. Exe path contains (separator-insensitive: rules use `/`, Windows
+    //    paths use `\`).
     if let Some(ref target) = rule.exe_path_contains {
-        if !process
-            .exe_path
-            .to_ascii_lowercase()
-            .contains(&target.to_ascii_lowercase())
-        {
+        let haystack = process.exe_path.to_ascii_lowercase().replace('\\', "/");
+        let needle = target.to_ascii_lowercase().replace('\\', "/");
+        if !haystack.contains(&needle) {
             return false;
         }
     }
@@ -150,13 +196,11 @@ fn matches_rule(
         }
     }
 
-    // 4. Exclude path contains
+    // 4. Exclude path contains (separator-insensitive, see rule 2).
     if let Some(ref target) = rule.exclude_path_contains {
-        if process
-            .exe_path
-            .to_ascii_lowercase()
-            .contains(&target.to_ascii_lowercase())
-        {
+        let haystack = process.exe_path.to_ascii_lowercase().replace('\\', "/");
+        let needle = target.to_ascii_lowercase().replace('\\', "/");
+        if haystack.contains(&needle) {
             return false;
         }
     }
@@ -428,6 +472,58 @@ mod tests {
             classify(&proc, std::slice::from_ref(&proc), &defs),
             Some(AgentKind::OpenCode)
         );
+    }
+
+    #[test]
+    fn classify_matches_windows_exe_basename() {
+        // On Windows sysinfo reports `opencode.exe`; a rule written as
+        // `opencode` must still match.
+        let defs = vec![def_opencode()];
+        let proc = snapshot(
+            123,
+            "C:\\Users\\me\\AppData\\opencode.exe",
+            "opencode.exe",
+            &["opencode.exe"],
+            false,
+        );
+        assert_eq!(
+            classify(&proc, std::slice::from_ref(&proc), &defs),
+            Some(AgentKind::OpenCode)
+        );
+    }
+
+    #[test]
+    fn is_shell_process_recognizes_windows_shells() {
+        assert!(is_shell_process("powershell.exe"));
+        assert!(is_shell_process("pwsh.exe"));
+        assert!(is_shell_process("cmd.exe"));
+        assert!(is_shell_process("bash"));
+        assert!(!is_shell_process("opencode.exe"));
+    }
+
+    #[test]
+    fn classify_matches_with_windows_shell_parent() {
+        let mut def = def_opencode();
+        def.rules[0].require_shell_parent = true;
+        let defs = vec![def];
+
+        let shell = snapshot(
+            100,
+            "C:\\Windows\\System32\\cmd.exe",
+            "cmd.exe",
+            &["cmd.exe"],
+            false,
+        );
+        let proc = snapshot_with_parent(
+            200,
+            Some(100),
+            "C:\\Users\\me\\opencode.exe",
+            "opencode.exe",
+            &["opencode.exe"],
+            false,
+        );
+        let procs = vec![shell, proc.clone()];
+        assert_eq!(classify(&proc, &procs, &defs), Some(AgentKind::OpenCode));
     }
 
     #[test]
