@@ -132,9 +132,24 @@ sudo apt install libwebkit2gtk-4.1-dev \
   libayatana-appindicator3-dev
 ```
 
-#### Toolchain
+#### System dependencies (macOS)
 
-- Rust stable (1.80+)
+- Xcode Command Line Tools: `xcode-select --install`
+
+WebKit (the WebView used by Tauri) ships with macOS, so there is nothing else
+to install for the GUI.
+
+#### System dependencies (Windows)
+
+- Microsoft Visual Studio C++ Build Tools (MSVC linker)
+- WebView2 runtime (preinstalled on Windows 10/11)
+
+`git2` builds with `vendored-libgit2`, so no system libgit2 or OpenSSL is
+needed on any platform.
+
+#### Toolchain (all platforms)
+
+- Rust stable (1.80+) via `rustup`
 - Node.js 20+
 - pnpm 9+
 
@@ -224,6 +239,33 @@ This runs `pnpm -C apps/desktop tauri build --bundles nsis` and prints the path
 of the generated installer — `target\release\bundle\nsis\OpenCherry_<version>_x64-setup.exe`.
 Double-click it to install. The installer is unsigned, so Windows SmartScreen
 may warn on first run; choose **More info → Run anyway**.
+
+### macOS disk image (`.dmg`)
+
+macOS builds produce a `.dmg` disk image. There are two ways to get one.
+
+**Download from CI** — every tagged release (`v*`) attaches Apple Silicon
+(`aarch64`) and Intel (`x86_64`) disk images to its GitHub Release. Manually
+triggering the **Release (macOS)** workflow (`workflow_dispatch`) builds both
+and uploads them as downloadable build artifacts.
+
+**Build locally on macOS** — install the Xcode Command Line Tools
+(`xcode-select --install`), Rust stable via `rustup`, and Node.js 20+ / pnpm 9+.
+Then, from the repo root:
+
+```bash
+./scripts/build-macos.sh
+```
+
+This runs `pnpm -C apps/desktop tauri build --bundles dmg` and prints the path
+of the generated image — `target/release/bundle/dmg/OpenCherry_<version>_<arch>.dmg`.
+Open it and drag **OpenCherry** to Applications. The app is unsigned and not
+notarized, so on first launch macOS Gatekeeper may block it; right-click the app
+→ **Open**, or allow it in **System Settings → Privacy & Security**.
+
+To cross-compile for both architectures from one machine, add the targets with
+`rustup target add aarch64-apple-darwin x86_64-apple-darwin` and set
+`OPENCHERRY_MAC_TARGET` (e.g. `OPENCHERRY_MAC_TARGET=universal-apple-darwin`).
 
 ## Testing
 

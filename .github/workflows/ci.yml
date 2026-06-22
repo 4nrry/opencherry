@@ -51,6 +51,30 @@ jobs:
       - name: Run Rust tests
         run: cargo test --workspace
 
+  cross-platform:
+    name: cross-platform (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+
+      # The library crates carry the platform-sensitive logic (agent detection,
+      # git, persistence). Testing them on Windows and macOS guards against
+      # cross-platform regressions without the heavy WebView GUI build.
+      - name: Run library crate tests
+        run: cargo test -p opencherry_core -p opencherry_repo -p opencherry_agents -p opencherry_persistence
+
   desktop-frontend:
     runs-on: ubuntu-latest
 

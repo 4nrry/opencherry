@@ -29,6 +29,14 @@ check:
 build-deb:
     ./scripts/build-deb.sh
 
+# Build the production .dmg disk image (macOS)
+build-macos:
+    ./scripts/build-macos.sh
+
+# Build the production .exe installer (Windows; run from PowerShell)
+build-windows:
+    pwsh ./scripts/build-windows.ps1
+
 # List all available commands
 list:
     @just --list
