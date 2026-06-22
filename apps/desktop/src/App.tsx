@@ -380,6 +380,32 @@ function RepoGroupView(props: {
     });
   }
 
+  const [syncingAll, setSyncingAll] = createSignal(false);
+  const [syncErrors, setSyncErrors] = createSignal<{repoName: string, path: string, errorMsg: string}[]>([]);
+
+  const handleSyncAll = async () => {
+    setSyncingAll(true);
+    setSyncErrors([]);
+    try {
+      const repos = snapshot()?.repos ?? [];
+      const tracked = repos.filter(r => isTrackedRepo(r.repo.path)).map(r => r.repo.path);
+      
+      const promises = tracked.map(async path => {
+        try {
+          await syncChanges(path);
+        } catch (e) {
+          const name = path.split('/').pop() || path;
+          setSyncErrors(errs => [...errs, { repoName: name, path, errorMsg: String(e) }]);
+        }
+      });
+      await Promise.all(promises);
+      
+      await refetch();
+    } finally {
+      setSyncingAll(false);
+    }
+  };
+
   let timer: ReturnType<typeof setInterval> | undefined;
   onMount(() => {
     timer = setInterval(() => {
@@ -392,9 +418,21 @@ function RepoGroupView(props: {
 
   return (
     <section class="repo-view">
-      <header class="repo-view__header">
-        <h1>{props.group.display_name}</h1>
-        <code class="repo-view__path">{props.group.path}</code>
+      <header class="repo-view__header" style={{ "flex-direction": "row", "align-items": "center", "justify-content": "space-between" }}>
+        <div>
+          <h1>{props.group.display_name}</h1>
+          <code class="repo-view__path">{props.group.path}</code>
+        </div>
+        <button
+          onClick={handleSyncAll}
+          disabled={syncingAll()}
+          class="btn--sync-all"
+        >
+          <span>{syncingAll() ? 'Sincronizando...' : 'Sincronizar tudo'}</span>
+          <svg class={syncingAll() ? 'icon-spin' : ''} width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 1121.21 16H18m0 0H22m-3 0v4" />
+          </svg>
+        </button>
       </header>
 
       <Show
@@ -407,6 +445,13 @@ function RepoGroupView(props: {
       >
         {(group) => (
           <>
+            <Show when={syncErrors().length > 0}>
+              <div class="banner banner--error" style={{ display: 'flex', "flex-direction": "column", gap: '8px', padding: '12px' }}>
+                <For each={syncErrors()}>
+                  {err => <SyncErrorItem error={err} />}
+                </For>
+              </div>
+            </Show>
             <div class="status-grid">
               <StatusCard label="Repos" value={String(group().repos.length)} />
               <StatusCard
@@ -1029,6 +1074,37 @@ export function DiffGroup(props: {
         </For>
       </section>
     </Show>
+  );
+}
+
+function SyncErrorItem(props: { error: { repoName: string, path: string, errorMsg: string } }) {
+  const [copied, setCopied] = createSignal(false);
+
+  const handleCopy = () => {
+    const isConflict = props.error.errorMsg.toLowerCase().includes("conflict") || props.error.errorMsg.toLowerCase().includes("merge");
+    const prompt = isConflict
+      ? `I tried to sync the repository at '${props.error.path}' but ran into a git merge conflict. Please find the conflicting files, carefully resolve the conflicts preserving logic from both branches, and then run 'git commit' to finish the merge.`
+      : `I tried to sync the repository at '${props.error.path}' but encountered this git error:\n\n${props.error.errorMsg}\n\nPlease investigate and fix this issue so I can sync successfully.`;
+
+    void navigator.clipboard.writeText(prompt);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div style={{ display: 'flex', "align-items": "start", "justify-content": "space-between", gap: '12px', "border-bottom": "1px solid rgba(255,255,255,0.1)", "padding-bottom": "8px" }}>
+      <div style={{ flex: 1, "word-break": "break-word" }}>
+        <strong>{props.error.repoName}</strong>: {props.error.errorMsg}
+      </div>
+      <button
+        class="btn btn--tiny"
+        style={{ "white-space": "nowrap", "flex-shrink": 0 }}
+        onClick={handleCopy}
+        title="Copy prompt for your AI agent"
+      >
+        {copied() ? "✅ Copied" : "📋 Copy Prompt"}
+      </button>
+    </div>
   );
 }
 

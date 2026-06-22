@@ -1105,3 +1105,47 @@ body,
   padding: var(--space-xxs) 0;
   margin: 0;
 }
+
+.btn--sync-all {
+  background: var(--color-component-selected-bg);
+  color: var(--color-component-selected-fg);
+  border-radius: var(--radius-m);
+  padding: 6px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  border: 1px solid var(--color-component-selected-bg);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  transition: all 0.3s;
+  cursor: pointer;
+}
+
+.btn--sync-all:hover:not(:disabled) {
+  background: var(--color-component-selected-bg);
+  filter: brightness(1.2);
+  transform: scale(1.01);
+  box-shadow: 0 4px 12px var(--color-component-selected-bg);
+}
+
+.btn--sync-all:active:not(:disabled) {
+  transform: scale(0.99);
+}
+
+.btn--sync-all:disabled {
+  background: var(--color-component-selected-bg);
+  color: var(--color-component-selected-fg);
+  opacity: 0.5;
+  cursor: not-allowed;
+  border-color: var(--color-component-selected-bg);
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.icon-spin {
+  animation: spin 1s linear infinite;
+}
