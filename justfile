@@ -29,6 +29,10 @@ check:
 build-deb:
     ./scripts/build-deb.sh
 
+# Build the production AppImage (Linux)
+build-appimage:
+    ./scripts/build-appimage.sh
+
 # Build the production .dmg disk image (macOS)
 build-macos:
     ./scripts/build-macos.sh
