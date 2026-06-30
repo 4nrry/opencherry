@@ -92,7 +92,7 @@ jobs:
       - name: Publish to winget
         uses: vedantmgoyal9/winget-releaser@v2
         with:
-          identifier: 4nrry.OpenCherry
+          identifier: 4nrry.OpenCherryDesktop
           installers-regex: '\.exe$'
           release-tag: ${{ github.ref_name }}
           token: ${{ secrets.WINGET_TOKEN }}

@@ -8,7 +8,7 @@ check validates each PR (including running the installer in Windows Sandbox).
 Once published, Windows users can:
 
 ```powershell
-winget install 4nrry.OpenCherry
+winget install 4nrry.OpenCherryDesktop
 ```
 
 ## How publishing works
@@ -38,7 +38,7 @@ never breaks a release before the one-time setup below is done.
    # add --submit (with a GitHub token) to open the PR to microsoft/winget-pkgs.
    ```
 
-   This registers the `PackageIdentifier` `4nrry.OpenCherry`. Wait for the PR to
+   This registers the `PackageIdentifier` `4nrry.OpenCherryDesktop`. Wait for the PR to
    be validated and merged.
 
 2. **Fork** `microsoft/winget-pkgs` under the `4nrry` account (the action pushes to
@@ -55,7 +55,7 @@ After that, every `git tag vX.Y.Z` push opens an update PR to winget-pkgs.
 
 ## Notes
 
-- `PackageIdentifier` follows `Publisher.Package` → `4nrry.OpenCherry`.
+- `PackageIdentifier` follows `Publisher.Package` → `4nrry.OpenCherryDesktop`.
 - `installers-regex: '\.exe$'` matches the NSIS installer (and skips the `.sha256`).
 - `release-tag` is pinned to the pushed tag so the job resolves the right release
   even though it runs from a tag-push (not a `release` event).
