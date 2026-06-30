@@ -1,11 +1,13 @@
 name: Release (Linux)
 
-# Builds the OpenCherry desktop app as a Debian package (.deb).
+# Builds the OpenCherry desktop app as Linux packages: Debian (.deb), AppImage,
+# and RPM, each with a SHA-256 checksum.
 #
 # Triggers:
-#   - Push of a tag matching `v*` (e.g. v0.0.1) — attaches the .deb to the
-#     matching GitHub Release.
-#   - Manual `workflow_dispatch` — uploads the .deb as a build artifact only
+#   - Push of a tag matching `v*` (e.g. v0.0.1) — attaches the packages and
+#     checksums to the matching GitHub Release, sets the release notes from
+#     CHANGELOG.md, and (when enabled) publishes the AUR package.
+#   - Manual `workflow_dispatch` — uploads the packages as build artifacts only
 #     (no release).
 
 on:
@@ -33,7 +35,8 @@ jobs:
             libwebkit2gtk-4.1-dev \
             libappindicator3-dev \
             librsvg2-dev \
-            patchelf
+            patchelf \
+            rpm
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -59,19 +62,98 @@ jobs:
         run: pnpm install --frozen-lockfile
         working-directory: apps/desktop
 
-      - name: Build .deb package
-        run: pnpm tauri build --bundles deb
+      - name: Build Linux bundles (.deb, .AppImage, .rpm)
+        run: pnpm tauri build --bundles deb,appimage,rpm
         working-directory: apps/desktop
+        env:
+          # Stripping can corrupt the AppImage runtime on some toolchains.
+          NO_STRIP: "true"
 
-      - name: Upload .deb artifact
+      - name: Generate SHA-256 checksums
+        run: |
+          set -euo pipefail
+          for f in \
+            target/release/bundle/deb/*.deb \
+            target/release/bundle/appimage/*.AppImage \
+            target/release/bundle/rpm/*.rpm; do
+            [ -e "$f" ] || continue
+            ( cd "$(dirname "$f")" && sha256sum "$(basename "$f")" > "$(basename "$f").sha256" )
+          done
+
+      - name: Upload Linux artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: opencherry-linux-deb
-          path: target/release/bundle/deb/*.deb
+          name: opencherry-linux-packages
+          path: |
+            target/release/bundle/deb/*.deb
+            target/release/bundle/deb/*.deb.sha256
+            target/release/bundle/appimage/*.AppImage
+            target/release/bundle/appimage/*.AppImage.sha256
+            target/release/bundle/rpm/*.rpm
+            target/release/bundle/rpm/*.rpm.sha256
           if-no-files-found: error
 
-      - name: Attach .deb to release
+      - name: Extract release notes from CHANGELOG
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          awk -v ver="$version" '
+            $0 ~ "^## \\[" ver "\\]"   { capture=1; next }
+            capture && /^## \[/        { exit }
+            capture && /^\[[^]]+\]: /  { exit }
+            capture                    { print }
+          ' CHANGELOG.md > changelog_section.md
+          if [ ! -s changelog_section.md ]; then
+            echo "Release ${GITHUB_REF_NAME}" > changelog_section.md
+          fi
+
+      # The Linux workflow uniquely owns the release body; macOS/Windows attach
+      # files only. action-gh-release@v2 preserves an existing body when called
+      # without one, so this is race-safe across the three parallel workflows.
+      - name: Attach Linux assets to release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: target/release/bundle/deb/*.deb
+          body_path: changelog_section.md
+          files: |
+            target/release/bundle/deb/*.deb
+            target/release/bundle/deb/*.deb.sha256
+            target/release/bundle/appimage/*.AppImage
+            target/release/bundle/appimage/*.AppImage.sha256
+            target/release/bundle/rpm/*.rpm
+            target/release/bundle/rpm/*.rpm.sha256
+
+  # Publishes the AUR package `opencherry-bin`. Dormant until configured: set the
+  # repo variable PUBLISH_AUR=true and provide the AUR_SSH_PRIVATE_KEY secret plus
+  # AUR_COMMIT_USERNAME / AUR_COMMIT_EMAIL variables. See packaging/aur/README.md.
+  publish-aur:
+    needs: build-linux
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v') && vars.PUBLISH_AUR == 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Inject version and checksum into PKGBUILD
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          base="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}"
+          sum_x86="$(curl -fsSL "${base}/opencherry_${version}_amd64.AppImage.sha256" | cut -d' ' -f1)"
+          [ -n "$sum_x86" ] || { echo "missing x86_64 AppImage checksum"; exit 1; }
+          sed -i \
+            -e "s/^pkgver=.*/pkgver=${version}/" \
+            -e "s/REPLACE_WITH_SHA256_X86_64/${sum_x86}/" \
+            packaging/aur/PKGBUILD
+
+      - name: Publish to AUR
+        uses: KSXGitHub/github-actions-deploy-aur@v4.1.3
+        with:
+          pkgname: opencherry-bin
+          pkgbuild: packaging/aur/PKGBUILD
+          commit_username: ${{ vars.AUR_COMMIT_USERNAME }}
+          commit_email: ${{ vars.AUR_COMMIT_EMAIL }}
+          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          commit_message: "Update to ${{ github.ref_name }}"
+          updpkgsums: false

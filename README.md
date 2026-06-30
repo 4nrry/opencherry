@@ -168,11 +168,26 @@ just check
 
 ## Packaging & local install
 
-OpenCherry ships as a plain Debian package (`.deb`) — no sandbox, no store, no
-auto-updater. The app spawns external AI CLI agents and manages Git repos in
-arbitrary filesystem locations, so an unsandboxed package is the right fit;
-Flatpak/Snap are deferred (Snap with `confinement: classic` is the likely future
-route).
+OpenCherry ships as unsandboxed packages — no store, no auto-updater. The app
+spawns external AI CLI agents and manages Git repos in arbitrary filesystem
+locations, so an unsandboxed package is the right fit; Flatpak/Snap are deferred
+(Snap with `confinement: classic` is the likely future route). Linux releases
+are published as `.AppImage`, `.deb`, and `.rpm`; macOS as `.dmg`; Windows as an
+NSIS `.exe`. Every release asset ships with a matching `.sha256` checksum.
+
+### Quick install (one command)
+
+The fastest way to get OpenCherry on Linux (x86_64):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/4nrry/opencherry/main/scripts/install.sh | sh
+```
+
+This resolves the latest `.AppImage` for your architecture, verifies its
+SHA-256, installs it to `~/.local/bin/opencherry`, and adds an application-menu
+entry. AppImages need FUSE at runtime — if launch fails, install it with
+`sudo apt install libfuse2` (Debian/Ubuntu) or run
+`APPIMAGE_EXTRACT_AND_RUN=1 opencherry`.
 
 ### Build the `.deb`
 
@@ -184,15 +199,26 @@ above. Then:
 ```
 
 This runs `pnpm -C apps/desktop tauri build --bundles deb` and prints the path
-of the generated package — `target/release/bundle/deb/OpenCherry_<version>_amd64.deb`
+of the generated package — `target/release/bundle/deb/opencherry_<version>_amd64.deb`
 (the Cargo workspace `target/` directory at the repo root). The first release
 build is slow (`lto = "thin"`, `codegen-units = 1`); later builds reuse the
 cache.
 
+### Build the AppImage
+
+```bash
+just build-appimage      # or: ./scripts/build-appimage.sh
+```
+
+This produces `target/release/bundle/appimage/opencherry_<version>_amd64.AppImage`
+(Tauri uses the Debian `amd64` arch token for the AppImage and `.deb`).
+Run it directly (it needs FUSE — `sudo apt install libfuse2`), or use the
+one-command installer above to fetch a published build instead.
+
 ### Install and run
 
 ```bash
-sudo apt install "$(pwd)/target/release/bundle/deb/OpenCherry_0.0.1_amd64.deb"
+sudo apt install "$(pwd)/target/release/bundle/deb/opencherry_0.0.1_amd64.deb"
 ```
 
 Use `apt install` with a path (not `dpkg -i`) so runtime dependencies resolve
@@ -236,7 +262,7 @@ needed. Then, from the repo root in PowerShell:
 ```
 
 This runs `pnpm -C apps/desktop tauri build --bundles nsis` and prints the path
-of the generated installer — `target\release\bundle\nsis\OpenCherry_<version>_x64-setup.exe`.
+of the generated installer — `target\release\bundle\nsis\opencherry_<version>_x64-setup.exe`.
 Double-click it to install. The installer is unsigned, so Windows SmartScreen
 may warn on first run; choose **More info → Run anyway**.
 
@@ -258,7 +284,8 @@ Then, from the repo root:
 ```
 
 This runs `pnpm -C apps/desktop tauri build --bundles dmg` and prints the path
-of the generated image — `target/release/bundle/dmg/OpenCherry_<version>_<arch>.dmg`.
+of the generated image — `target/release/bundle/dmg/opencherry_<version>_<arch>.dmg`
+(`<arch>` is `aarch64` or `x64`).
 Open it and drag **OpenCherry** to Applications. The app is unsigned and not
 notarized, so on first launch macOS Gatekeeper may block it; right-click the app
 → **Open**, or allow it in **System Settings → Privacy & Security**.

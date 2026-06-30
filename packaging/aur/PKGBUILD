@@ -1,0 +1,50 @@
+# Maintainer: anrry <anrry.petrin@hotmail.com>
+#
+# AppImage-based AUR package for OpenCherry. The release CI injects `pkgver` and
+# `sha256sums` from the published x86_64 AppImage, so the REPLACE_WITH_*
+# placeholder below is filled in automatically on publish.
+#
+# x86_64 only for now: the Linux release pipeline builds an x86_64 AppImage.
+# Add aarch64 here once an arm64 Linux release artifact exists.
+pkgname=opencherry-bin
+pkgver=0.0.1
+pkgrel=1
+pkgdesc="Multi-repo x multi-agent control tower for AI coding agents"
+arch=('x86_64')
+url="https://github.com/4nrry/opencherry"
+license=('AGPL-3.0-or-later')
+depends=('fuse2' 'gtk3' 'webkit2gtk-4.1')
+provides=('opencherry')
+conflicts=('opencherry')
+# AppImages are self-contained; stripping them corrupts the runtime.
+options=('!strip')
+
+source=("opencherry-${pkgver}-x86_64.AppImage::https://github.com/4nrry/opencherry/releases/download/v${pkgver}/opencherry_${pkgver}_amd64.AppImage")
+sha256sums=('REPLACE_WITH_SHA256_X86_64')
+
+package() {
+  local appimage="opencherry-${pkgver}-x86_64.AppImage"
+
+  # Install the AppImage under /opt with a thin launcher on PATH.
+  install -Dm755 "$srcdir/$appimage" "$pkgdir/opt/opencherry/opencherry.AppImage"
+  install -dm755 "$pkgdir/usr/bin"
+  printf '#!/bin/sh\nexec /opt/opencherry/opencherry.AppImage "$@"\n' \
+    > "$pkgdir/usr/bin/opencherry"
+  chmod 755 "$pkgdir/usr/bin/opencherry"
+
+  # Extract the desktop entry + icon (--appimage-extract needs no FUSE).
+  cd "$srcdir"
+  chmod +x "$appimage"
+  ./"$appimage" --appimage-extract >/dev/null
+
+  install -Dm644 squashfs-root/*.desktop \
+    "$pkgdir/usr/share/applications/opencherry.desktop"
+  sed -i -e 's|^Exec=.*|Exec=/usr/bin/opencherry|' \
+         -e 's|^Icon=.*|Icon=opencherry|' \
+         "$pkgdir/usr/share/applications/opencherry.desktop"
+
+  install -Dm644 squashfs-root/opencherry.png \
+    "$pkgdir/usr/share/icons/hicolor/256x256/apps/opencherry.png" 2>/dev/null \
+    || install -Dm644 "$(ls -S squashfs-root/*.png | head -n1)" \
+       "$pkgdir/usr/share/icons/hicolor/256x256/apps/opencherry.png"
+}

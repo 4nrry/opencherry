@@ -26,6 +26,8 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
 
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
@@ -47,6 +49,9 @@ jobs:
 
       - name: Build frontend
         run: pnpm -C apps/desktop build
+
+      - name: Run clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Run Rust tests
         run: cargo test --workspace
@@ -162,3 +167,36 @@ jobs:
 
       - name: Run desktop E2E
         run: pnpm test:e2e
+
+  fmt:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+  audit:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+
+      # Fails on security vulnerabilities. Unmaintained/unsound advisories
+      # (e.g. the GTK3 bindings Tauri requires on Linux) surface as warnings
+      # without failing the build.
+      - name: Run cargo audit
+        run: cargo audit
